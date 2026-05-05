@@ -10,7 +10,7 @@ Cron (on Pi):
 import sys, os, datetime
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from kolo_agent       import get_moisture_commentary, save_moisture_commentary, get_weather
+from kolo_agent       import get_moisture_commentary, save_moisture_commentary, get_weather, send_telegram_message
 from kolo_aqara       import get_sensor_data as aqara_data
 from kolo_soil        import get_soil_data
 
@@ -28,6 +28,10 @@ def main():
     if comment:
         save_moisture_commentary(comment)
         print(f"  Saved: {comment[:120]}…")
+        hour = datetime.datetime.now().hour
+        label = "🌅 Morning" if hour < 12 else "🌇 Afternoon"
+        send_telegram_message(f"{label} moisture insight\n\n{comment}")
+        print("  Telegram sent.")
     else:
         print("  No response from Ollama.")
 
