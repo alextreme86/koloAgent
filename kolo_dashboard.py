@@ -656,7 +656,7 @@ select{background:var(--ink2);border:1px solid var(--border2);border-radius:6px;
       <div id="water-decision" style="display:none;margin-bottom:6px">
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
           <div style="background:rgba(42,110,142,0.07);border:1px solid rgba(42,110,142,0.18);border-radius:10px;padding:10px">
-            <div style="font-size:10px;text-transform:uppercase;letter-spacing:.06em;color:var(--fog4);margin-bottom:6px">Greenhouse</div>
+            <div style="font-size:10px;text-transform:uppercase;letter-spacing:.06em;color:var(--fog4);margin-bottom:6px">Irrigation greenhouse zone</div>
             <div class="dec-header" style="margin-bottom:4px">
               <div id="water-gh-icon" class="dec-x">&#x2715;</div>
               <div class="dec-title" id="water-gh-title" style="color:var(--red3)">&#x2014;</div>
@@ -664,7 +664,7 @@ select{background:var(--ink2);border:1px solid var(--border2);border-radius:6px;
             <div class="dec-reason" id="water-gh-reason" style="color:var(--fog2)">&#x2014;</div>
           </div>
           <div style="background:rgba(42,110,142,0.07);border:1px solid rgba(42,110,142,0.18);border-radius:10px;padding:10px">
-            <div style="font-size:10px;text-transform:uppercase;letter-spacing:.06em;color:var(--fog4);margin-bottom:6px">Outdoor</div>
+            <div style="font-size:10px;text-transform:uppercase;letter-spacing:.06em;color:var(--fog4);margin-bottom:6px">Irrigation outdoor zone</div>
             <div class="dec-header" style="margin-bottom:4px">
               <div id="water-od-icon" class="dec-x">&#x2715;</div>
               <div class="dec-title" id="water-od-title" style="color:var(--red3)">&#x2014;</div>
