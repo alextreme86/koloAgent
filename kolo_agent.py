@@ -306,6 +306,9 @@ OBSERVATIONS: <one sentence about grass condition only>"""})
     return "Gemini error: max retries exceeded"
 
 
+OLLAMA_BASE       = "http://100.67.199.79:11434"
+OLLAMA_IRRIG_MODEL = "qwen3.5:4b"
+
 _IRRIGATION_PROMPT = (
     "Irrigation controller, Danish garden (Hedehusene DK). Decide whether to water each zone.\n"
     "RULES:\n"
@@ -359,31 +362,58 @@ def analyse_moisture_with_gemini(soil: dict, weather: dict,
         f"rain_last_6h: {rain_today > 0.5}",
     ])
 
+    prompt = _IRRIGATION_PROMPT + "\n\nDATA:\n" + data
+
+    def _parse(raw: str) -> dict:
+        result = {
+            "greenhouse": {"water_now": False, "reason": "", "duration_min": 10},
+            "outdoor":    {"water_now": False, "reason": "", "duration_min": 10},
+        }
+        for line in raw.splitlines():
+            line = line.strip()
+            if line.upper().startswith("GH:"):
+                parts = line.split(":", 2)
+                result["greenhouse"]["water_now"] = parts[1].upper() == "YES"
+                result["greenhouse"]["reason"] = parts[2] if len(parts) > 2 else ""
+            elif line.upper().startswith("OD:"):
+                parts = line.split(":", 2)
+                result["outdoor"]["water_now"] = parts[1].upper() == "YES"
+                result["outdoor"]["reason"] = parts[2] if len(parts) > 2 else ""
+        return result
+
+    # Try Ollama first (local, free)
+    try:
+        r = requests.post(
+            f"{OLLAMA_BASE}/api/chat",
+            json={
+                "model": OLLAMA_IRRIG_MODEL,
+                "messages": [{"role": "user", "content": prompt}],
+                "stream": False,
+                "think": False,
+                "options": {"temperature": 0.0, "num_predict": 80},
+            },
+            timeout=30,
+        )
+        if r.status_code == 200:
+            raw = r.json()["message"]["content"].strip()
+            print(f"  [irrigation] Ollama raw: {raw!r}")
+            return _parse(raw)
+    except Exception as e:
+        print(f"  [irrigation] Ollama unavailable: {e}")
+
+    # Fallback: Gemini
     url = (f"https://generativelanguage.googleapis.com/v1beta/models/"
            f"gemini-2.5-flash:generateContent?key={GEMINI_API_KEY}")
     payload = {
-        "contents": [{"parts": [{"text": _IRRIGATION_PROMPT + "\n\nDATA:\n" + data}]}],
-        "generationConfig": {"temperature": 0.0, "maxOutputTokens": 60},
+        "contents": [{"parts": [{"text": prompt}]}],
+        "generationConfig": {"temperature": 0.0, "maxOutputTokens": 80},
     }
     for attempt in range(3):
         r = requests.post(url, json=payload, timeout=30)
         if r.status_code == 200:
             raw = r.json()["candidates"][0]["content"]["parts"][0]["text"].strip()
-            result = {
-                "greenhouse": {"water_now": False, "reason": "", "duration_min": 10},
-                "outdoor":    {"water_now": False, "reason": "", "duration_min": 10},
-            }
-            for line in raw.splitlines():
-                line = line.strip()
-                if line.upper().startswith("GH:"):
-                    parts = line.split(":", 2)
-                    result["greenhouse"]["water_now"] = parts[1].upper() == "YES"
-                    result["greenhouse"]["reason"] = parts[2] if len(parts) > 2 else ""
-                elif line.upper().startswith("OD:"):
-                    parts = line.split(":", 2)
-                    result["outdoor"]["water_now"] = parts[1].upper() == "YES"
-                    result["outdoor"]["reason"] = parts[2] if len(parts) > 2 else ""
-            return result
+            print(f"  [irrigation] Gemini raw: {raw!r}")
+            return _parse(raw)
         if r.status_code == 429 and attempt < 2:
             time.sleep(20)
             continue
