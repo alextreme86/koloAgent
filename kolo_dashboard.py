@@ -176,31 +176,24 @@ def api_analyse():
 def api_moisture_analysis():
     import sqlite3 as _sq
     DB = os.path.join(os.path.dirname(os.path.abspath(__file__)), "kolo_data.db")
-    soil_rows, weather_rows, irr_rows = [], [], []
+    soil_rows, weather_rows = [], []
     if os.path.exists(DB):
         con = _sq.connect(DB)
         con.row_factory = _sq.Row
-        # Latest moisture per zone (last 3 readings for trend)
         soil_rows = con.execute(
             """SELECT zone, moisture, soil_temp, ts FROM sensor_readings
                WHERE ts >= datetime('now','-30 minutes')
                ORDER BY ts DESC"""
         ).fetchall()
-        # Latest weather snapshot
         weather_rows = con.execute(
             """SELECT * FROM weather_readings ORDER BY ts DESC LIMIT 1"""
         ).fetchall()
-        # Last 5 completed irrigation events
-        irr_rows = con.execute(
-            """SELECT zone, ts_open, duration_actual_s, moisture_before, moisture_after
-               FROM irrigation_events WHERE status='completed'
-               ORDER BY id DESC LIMIT 5"""
-        ).fetchall()
         con.close()
-    # Fall back to live if DB empty
     soil_live = get_soil_data(use_cache=True) if not soil_rows else {}
     w_live    = get_weather()                  if not weather_rows else {}
-    result = analyse_moisture_with_gemini(soil_live, w_live, soil_rows, weather_rows, irr_rows)
+    aq_live   = aqara_data(use_cache=True)
+    result = analyse_moisture_with_gemini(soil_live, w_live, soil_rows, weather_rows,
+                                          aqara=aq_live)
     return jsonify({"result": result, "ts": datetime.datetime.now().isoformat()})
 
 
@@ -625,6 +618,27 @@ select{background:var(--ink2);border:1px solid var(--border2);border-radius:6px;
     </div>
     <div class="cam-grid" id="cam-grid" style="display:none"></div>
     <div id="analysis-card" style="display:none">
+      <!-- Watering decision cards (shown when moisture AI returns JSON) -->
+      <div id="water-decision" style="display:none;margin-bottom:6px">
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+          <div style="background:rgba(42,110,142,0.07);border:1px solid rgba(42,110,142,0.18);border-radius:10px;padding:10px">
+            <div style="font-size:10px;text-transform:uppercase;letter-spacing:.06em;color:var(--fog4);margin-bottom:6px">Greenhouse</div>
+            <div class="dec-header" style="margin-bottom:4px">
+              <div id="water-gh-icon" class="dec-x">&#x2715;</div>
+              <div class="dec-title" id="water-gh-title" style="color:var(--red3)">&#x2014;</div>
+            </div>
+            <div class="dec-reason" id="water-gh-reason">&#x2014;</div>
+          </div>
+          <div style="background:rgba(42,110,142,0.07);border:1px solid rgba(42,110,142,0.18);border-radius:10px;padding:10px">
+            <div style="font-size:10px;text-transform:uppercase;letter-spacing:.06em;color:var(--fog4);margin-bottom:6px">Outdoor</div>
+            <div class="dec-header" style="margin-bottom:4px">
+              <div id="water-od-icon" class="dec-x">&#x2715;</div>
+              <div class="dec-title" id="water-od-title" style="color:var(--red3)">&#x2014;</div>
+            </div>
+            <div class="dec-reason" id="water-od-reason">&#x2014;</div>
+          </div>
+        </div>
+      </div>
       <div class="analysis-box" id="analysis-txt"></div>
     </div>
   </div>
@@ -898,21 +912,49 @@ async function moistureStatus() {
   const card = document.getElementById("analysis-card");
   const txt  = document.getElementById("analysis-txt");
   const grid = document.getElementById("cam-grid");
+  const wdec = document.getElementById("water-decision");
   card.style.display = "block";
   grid.style.display = "none";
-  txt.textContent = "⏳ Analysing soil moisture and weather forecast…";
+  wdec.style.display = "none";
+  txt.style.display = "block";
+  txt.textContent = "\\u23f3 Analysing soil moisture\\u2026";
   try {
     const r = await fetch("/api/moisture-analysis" + Q, {method:"POST", headers: H});
     const d = await r.json();
-    const res = d.result || "Analysis complete";
-    if (res.startsWith("Gemini error 503")) {
-      txt.textContent = "Gemini is busy — please try again in a minute.";
-    } else if (res.startsWith("Gemini error")) {
-      txt.textContent = "AI unavailable: " + res.split(":")[1]?.trim().split("\\n")[0];
+    const res = d.result;
+    if (res && typeof res === "object" && (res.greenhouse || res.outdoor)) {
+      txt.style.display = "none";
+      wdec.style.display = "block";
+      function applyZone(zone, iconId, titleId, reasonId) {
+        const icon   = document.getElementById(iconId);
+        const title  = document.getElementById(titleId);
+        const reason = document.getElementById(reasonId);
+        if (!zone) { title.textContent = "No data"; reason.textContent = ""; return; }
+        if (zone.water_now) {
+          icon.className = "dec-check"; icon.textContent = "\\u2713";
+          title.textContent = "Water " + (zone.duration_min || 10) + "min";
+          title.style.color = "var(--water2)";
+        } else {
+          icon.className = "dec-x"; icon.textContent = "\\u2715";
+          title.textContent = "Skip";
+          title.style.color = "var(--leaf3)";
+        }
+        reason.textContent = zone.reason || "";
+      }
+      applyZone(res.greenhouse, "water-gh-icon", "water-gh-title", "water-gh-reason");
+      applyZone(res.outdoor,    "water-od-icon", "water-od-title", "water-od-reason");
     } else {
-      txt.textContent = res;
+      txt.style.display = "block";
+      const resStr = typeof res === "string" ? res : JSON.stringify(res);
+      if (resStr.startsWith("Gemini error 503")) {
+        txt.textContent = "Gemini is busy \\u2014 please try again in a minute.";
+      } else if (resStr.startsWith("Gemini error")) {
+        txt.textContent = "AI unavailable: " + resStr.split(":")[1]?.trim().split("\\\\n")[0];
+      } else {
+        txt.textContent = resStr;
+      }
     }
-  } catch(e) { txt.textContent = "Error: " + e; }
+  } catch(e) { txt.style.display = "block"; txt.textContent = "Error: " + e; }
 }
 
 async function mowerAction(action) {

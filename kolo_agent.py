@@ -296,80 +296,145 @@ OBSERVATIONS: <one sentence about grass condition only>"""})
     return "Gemini error: max retries exceeded"
 
 
+_IRRIGATION_SYSTEM_PROMPT = """You are an irrigation decision assistant for a smart garden system \
+located in Hedehusene, Taastrup (Denmark, ~25km west of Copenhagen).
+Marine west coast climate (Cfb). Current month context matters for \
+evaporation and rain frequency.
+
+## SYSTEM SETUP
+- 2 irrigation zones, each with combined drip + nebulizer on a single valve
+- Greenhouse zone: fully enclosed, rain never enters, temperature controlled
+- Outdoor zone: exposed to weather, urban/suburban setting
+
+## SENSORS AVAILABLE
+Greenhouse zone:
+- Greenhouse soil moisture %
+- Greenhouse Basil soil moisture %
+- Greenhouse air temp (°C)
+- Greenhouse RH %
+
+Outdoor zone:
+- Bed 80cm soil moisture %
+- Strawberries soil moisture %
+- Germination Box soil moisture %
+- Outdoor air temp (°C)
+- Outdoor RH %
+- Outdoor pressure (hPa)
+
+## DECISION RULES
+
+### Greenhouse valve
+Trigger ON if:
+- ANY soil sensor drops to <= 65%
+- Run for 10 min (adjustable)
+- Target moisture: 75-80%
+- Ignore weather completely (rain irrelevant)
+
+### Outdoor valve
+Trigger ON only if BOTH:
+1. ANY soil sensor drops to <= 65%
+2. No rain expected in next 24h
+- Run for 10 min (adjustable)
+- Target moisture: 70-78%
+- Skip if rain occurred in last 6h
+
+## TIMING RULES
+- Best watering windows: early morning (06:00-10:00) or late afternoon (17:00-20:00)
+- Avoid midday (11:00-16:00): high evaporation, water loss before absorption
+- If moisture is marginal and current time is midday, set water_now=false and explain \
+  to water in evening instead
+- Timestamp is provided in the input — use it to determine time of day
+
+## YOUR TASK
+When called, you receive current sensor readings and a weather \
+forecast summary. You must respond ONLY with a JSON object, \
+no explanation, no markdown, exactly this structure:
+
+{
+  "greenhouse": {
+    "water_now": true or false,
+    "reason": "brief reason",
+    "duration_min": 10
+  },
+  "outdoor": {
+    "water_now": true or false,
+    "reason": "brief reason",
+    "duration_min": 10
+  }
+}"""
+
+
 def analyse_moisture_with_gemini(soil: dict, weather: dict,
-                                  soil_rows=None, weather_rows=None, irr_rows=None) -> str:
-    """Use Gemini text to predict irrigation needs. Prefers DB rows over live dicts."""
-    lines = ["=== Kolonihave garden — irrigation analysis request ===\n"]
+                                  soil_rows=None, weather_rows=None, irr_rows=None,
+                                  aqara: dict = None) -> dict | str:
+    """Build structured irrigation decision via Gemini. Returns dict on success, str on error."""
+    import re as _re
 
-    # Soil moisture — prefer DB rows (last 30 min), fall back to live dict
-    if soil_rows:
-        # Group by zone, take latest reading per zone
-        seen = {}
-        for r in soil_rows:
-            z = r["zone"] if hasattr(r, "__getitem__") else r[0]
-            if z not in seen:
-                seen[z] = r
-        lines.append("Soil moisture (last 30 min from DB):")
-        for z, r in seen.items():
-            m  = r["moisture"]  if hasattr(r, "keys") else r[1]
-            t  = r["soil_temp"] if hasattr(r, "keys") else r[2]
-            ts = r["ts"]        if hasattr(r, "keys") else r[3]
-            lines.append(f"  {z}: {m}% moisture, {t}°C soil temp  [{ts}]")
-    else:
-        lines.append("Soil moisture (live):")
-        for k, v in soil.items():
-            if not isinstance(v, dict):
-                continue
-            if v.get("active"):
-                lines.append(f"  {v.get('label',k)}: {v.get('moisture','?')}% moisture, {v.get('temperature','?')}°C")
+    def _soil(key):
+        if soil_rows:
+            for row in soil_rows:
+                z = row["zone"] if hasattr(row, "keys") else row[0]
+                if z == key:
+                    return row["moisture"] if hasattr(row, "keys") else row[1]
+        s = soil.get(key, {})
+        return s.get("moisture") if isinstance(s, dict) else None
 
-    # Weather — prefer DB row
+    def _aq(zone, field):
+        a = (aqara or {}).get(zone, {})
+        return a.get(field) if isinstance(a, dict) else None
+
     if weather_rows:
         w = weather_rows[0]
-        lines.append(f"\nWeather snapshot [{w['ts'] if hasattr(w,'keys') else w[1]}]:")
-        lines.append(f"  Temp: {w['temp_c']}°C, humidity: {w['humidity']}%, wind: {w['wind_kmh']} km/h")
-        lines.append(f"  Rain today: {w['rain_mm_today']}mm, next 3h: {w['rain_next_3h']}mm")
-        lines.append(f"  Tomorrow max: {w['max_c_tomorrow']}°C, rain: {w['rain_tomorrow']}mm")
-        lines.append(f"  UV: {w['uv_index']}, solar: {w['solar_rad_wm2']} W/m², cloud: {w['cloud_cover']}%")
+        _wf = lambda k: w[k] if hasattr(w, "keys") else None
     else:
-        lines.append(f"\nWeather (live):")
-        lines.append(f"  Now: {weather.get('temp_c','?')}°C, humidity {weather.get('humidity','?')}%")
-        lines.append(f"  Rain today: {weather.get('rain_mm_today','?')}mm, next 3h: {weather.get('rain_next_3h','?')}mm")
-        lines.append(f"  Tomorrow: max {weather.get('max_c_tomorrow','?')}°C, rain {weather.get('rain_tomorrow','?')}mm")
+        _wf = lambda k: weather.get(k)
 
-    # Recent irrigation history for context
-    if irr_rows:
-        lines.append("\nRecent irrigation events:")
-        for r in irr_rows:
-            zone  = r["zone"]          if hasattr(r, "keys") else r[0]
-            ts_o  = r["ts_open"]       if hasattr(r, "keys") else r[1]
-            dur   = r["duration_actual_s"] if hasattr(r, "keys") else r[2]
-            m_bef = r["moisture_before"] if hasattr(r, "keys") else r[3]
-            m_aft = r["moisture_after"]  if hasattr(r, "keys") else r[4]
-            dur_m = f"{dur/60:.0f}min" if dur else "?"
-            lines.append(f"  {zone}: {ts_o[:10]} - {dur_m}, moisture {m_bef}% -> {m_aft}%")
+    rain_3h    = float(_wf("rain_next_3h")  or 0)
+    rain_today = float(_wf("rain_mm_today") or 0)
+    rain_tmrw  = float(_wf("rain_tomorrow") or 0)
 
-    prompt = "\n".join(lines) + """
+    input_data = {
+        "timestamp": datetime.datetime.now().isoformat(timespec="seconds"),
+        "greenhouse": {
+            "temp_c":                  _aq("greenhouse", "temperature"),
+            "rh_percent":              _aq("greenhouse", "humidity"),
+            "pressure_hpa":            None,
+            "soil_greenhouse_percent": _soil("greenhouse"),
+            "soil_basil_percent":      _soil("greenhouse_basil"),
+        },
+        "outdoor": {
+            "temp_c":                    _aq("outdoor", "temperature") or _wf("temp_c"),
+            "rh_percent":                _aq("outdoor", "humidity")    or _wf("humidity"),
+            "pressure_hpa":              _aq("outdoor", "pressure"),
+            "soil_bed80_percent":        _soil("cassa_alta"),
+            "soil_strawberries_percent": _soil("fragole"),
+            "soil_germination_percent":  _soil("cassa_bassa_serra") or _soil("cassa_bassa"),
+            "rain_expected_24h":         rain_3h > 0.5 or rain_tmrw > 2.0,
+            "rain_last_6h":              rain_today > 0.5,
+        },
+    }
 
-You are an irrigation advisor for a Danish summer cottage (kolonihave). Moisture thresholds: <15% = critical, 15-30% = dry, 30-60% = OK, >60% = wet.
-Using the data above:
-1. For each zone: current status and urgency
-2. Estimate when each dry zone will become critical (factor in temperature, UV, rain forecast)
-3. If irrigation history exists, note how effective past watering was (moisture delta per minute)
-4. Give a short actionable recommendation per zone
-
-Max 10 lines. Use zone names from the data. Plain text only, no markdown, no bold, no bullets."""
-
+    full_prompt = _IRRIGATION_SYSTEM_PROMPT + "\n\n" + json.dumps(input_data, indent=2)
     url = (f"https://generativelanguage.googleapis.com/v1beta/models/"
            f"gemini-2.5-flash:generateContent?key={GEMINI_API_KEY}")
     payload = {
-        "contents": [{"parts": [{"text": prompt}]}],
-        "generationConfig": {"temperature": 0.2, "maxOutputTokens": 400},
+        "contents": [{"parts": [{"text": full_prompt}]}],
+        "generationConfig": {"temperature": 0.1, "maxOutputTokens": 300},
     }
     for attempt in range(3):
         r = requests.post(url, json=payload, timeout=30)
         if r.status_code == 200:
-            return r.json()["candidates"][0]["content"]["parts"][0]["text"]
+            raw = r.json()["candidates"][0]["content"]["parts"][0]["text"].strip()
+            try:
+                return json.loads(raw)
+            except json.JSONDecodeError:
+                m = _re.search(r"\{.*\}", raw, _re.DOTALL)
+                if m:
+                    try:
+                        return json.loads(m.group())
+                    except Exception:
+                        pass
+            return raw
         if r.status_code == 429 and attempt < 2:
             time.sleep(20)
             continue
