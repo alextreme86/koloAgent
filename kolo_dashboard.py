@@ -253,7 +253,30 @@ def api_sensors():
 @app.route("/api/valves")
 @require_auth
 def api_valves():
-    return jsonify({"valves": get_all_valve_status(), "ts": datetime.datetime.now().isoformat()})
+    import sqlite3 as _sq
+    DB = os.path.join(os.path.dirname(os.path.abspath(__file__)), "kolo_data.db")
+    irr_cal = {}
+    if os.path.exists(DB):
+        con = _sq.connect(DB); con.row_factory = _sq.Row
+        rows = con.execute(
+            """SELECT zone, ts_open, duration_actual_s, moisture_before, moisture_after
+               FROM irrigation_events WHERE status='completed'
+               ORDER BY id DESC LIMIT 20"""
+        ).fetchall()
+        con.close()
+        seen = {}
+        for r in rows:
+            z = r["zone"]
+            if z not in seen and r["duration_actual_s"] and r["moisture_before"] is not None and r["moisture_after"] is not None:
+                dur_min = round(r["duration_actual_s"] / 60, 1)
+                delta   = round(r["moisture_after"] - r["moisture_before"], 1)
+                rate    = round(delta / dur_min, 2) if dur_min > 0 else None
+                seen[z] = {"date": r["ts_open"][:10], "duration_min": dur_min,
+                            "before": r["moisture_before"], "after": r["moisture_after"],
+                            "delta": delta, "rate_pct_per_min": rate}
+        irr_cal = seen
+    return jsonify({"valves": get_all_valve_status(), "irr_cal": irr_cal,
+                    "ts": datetime.datetime.now().isoformat()})
 
 
 @app.route("/api/valve/<name>/<action>", methods=["POST"])
@@ -696,6 +719,7 @@ select{background:var(--ink2);border:1px solid var(--border2);border-radius:6px;
         <div class="divider"></div>
         <div class="zone-lbl">Valve</div>
         <div id="gh-valve"><div style="color:var(--fog4);font-size:11px">Loading…</div></div>
+        <div id="gh-irr-cal" style="font-size:10px;color:var(--fog4);margin-top:5px">—</div>
       </div>
       <!-- Outdoor zone -->
       <div style="background:rgba(184,122,8,0.07);border:1px solid rgba(184,122,8,0.18);border-radius:12px;padding:12px">
@@ -715,6 +739,7 @@ select{background:var(--ink2);border:1px solid var(--border2);border-radius:6px;
         <div class="divider"></div>
         <div class="zone-lbl">Valve</div>
         <div id="out-valve"><div style="color:var(--fog4);font-size:11px">Loading…</div></div>
+        <div id="od-irr-cal" style="font-size:10px;color:var(--fog4);margin-top:5px">—</div>
       </div>
     </div>
   </div>
@@ -1090,10 +1115,24 @@ async function loadSensors() {
   } catch(e) { console.error("sensors:", e); }
 }
 
+function renderIrrCal(cal, elId) {
+  const el = document.getElementById(elId);
+  if (!el) return;
+  if (!cal) { el.textContent = "No irrigation history yet"; return; }
+  const rateStr = cal.rate_pct_per_min != null
+    ? cal.rate_pct_per_min + "%/min"
+    : "rate unknown";
+  el.textContent = cal.date + " \\u00b7 " + cal.duration_min + "min \\u00b7 "
+    + cal.before + "\\u2192" + cal.after + "% (+" + cal.delta + "%, " + rateStr + ")";
+}
+
 function renderValves(d) {
-    const v = d.valves || {};
+    const v   = d.valves  || {};
+    const cal = d.irr_cal || {};
     if (v.greenhouse) renderValve("greenhouse", v.greenhouse, "gh-valve");
     if (v.outdoor)    renderValve("outdoor",    v.outdoor,    "out-valve");
+    renderIrrCal(cal.greenhouse, "gh-irr-cal");
+    renderIrrCal(cal.outdoor,    "od-irr-cal");
 }
 
 async function loadValves() {
