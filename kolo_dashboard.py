@@ -62,12 +62,14 @@ def _read_pending(token: str = None) -> dict | None:
         return None
 
 
-# ── Auth (disabled — open access, re-enable later) ────────────────────────────
+# ── Auth ─────────────────────────────────────────────────────────────────────
 DASHBOARD_TOKEN = os.environ.get("KOLO_DASH_TOKEN", "kolo2026")
 
 def require_auth(f):
     @wraps(f)
     def decorated(*args, **kwargs):
+        if request.cookies.get("kolo_token") != DASHBOARD_TOKEN:
+            return Response("", 302, {"Location": "/login"})
         return f(*args, **kwargs)
     return decorated
 
@@ -332,8 +334,12 @@ button:hover{background:#5a9e52}
 @app.route("/login", methods=["GET", "POST"])
 def login():
     if request.method == "POST":
-        resp = Response("", 302, {"Location": "/"})
-        return resp
+        token = request.form.get("token", "")
+        if token == DASHBOARD_TOKEN:
+            resp = Response("", 302, {"Location": "/"})
+            resp.set_cookie("kolo_token", token, max_age=60*60*24*30, httponly=True)
+            return resp
+        return render_template_string(LOGIN_HTML, error=True)
     return render_template_string(LOGIN_HTML, error=False)
 
 
