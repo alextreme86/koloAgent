@@ -315,10 +315,13 @@ _IRRIGATION_PROMPT = (
     "- Greenhouse: water if any sensor <=65%. Ignore rain. Target 75-80%.\n"
     "- Outdoor: water if any sensor <=65% AND rain_expected_24h=false AND rain_last_6h=false. Target 70-78%.\n"
     "- Avoid 11:00-16:00 (peak evaporation) — check timestamp.\n"
-    "- If NO: estimate days until watering needed given current moisture, temp, RH (e.g. '~3d').\n"
-    "Reply with EXACTLY 2 lines, nothing else:\n"
-    "GH:YES:<short reason>  or  GH:NO:<short reason, include ~Xd estimate>\n"
-    "OD:YES:<short reason>  or  OD:NO:<short reason, include ~Xd estimate>"
+    "- Always include a short comment and days estimate (~Xd) in the reason.\n"
+    "Output EXACTLY 2 lines, no extra text, no blank lines:\n"
+    "GH:YES:<reason>  or  GH:NO:<reason ~Xd>\n"
+    "OD:YES:<reason>  or  OD:NO:<reason ~Xd>\n"
+    "Example:\n"
+    "GH:NO:sensors 72-78%, ok ~4d\n"
+    "OD:NO:rain expected, check ~2d"
 )
 
 
@@ -390,9 +393,9 @@ def analyse_moisture_with_gemini(soil: dict, weather: dict,
                 "messages": [{"role": "user", "content": prompt}],
                 "stream": False,
                 "think": False,
-                "options": {"temperature": 0.0, "num_predict": 80},
+                "options": {"temperature": 0.0, "num_predict": 120},
             },
-            timeout=30,
+            timeout=90,
         )
         if r.status_code == 200:
             raw = r.json()["message"]["content"].strip()
@@ -401,12 +404,16 @@ def analyse_moisture_with_gemini(soil: dict, weather: dict,
     except Exception as e:
         print(f"  [irrigation] Ollama unavailable: {e}")
 
-    # Fallback: Gemini
+    # Fallback: Gemini (thinking disabled to avoid token waste)
     url = (f"https://generativelanguage.googleapis.com/v1beta/models/"
            f"gemini-2.5-flash:generateContent?key={GEMINI_API_KEY}")
     payload = {
         "contents": [{"parts": [{"text": prompt}]}],
-        "generationConfig": {"temperature": 0.0, "maxOutputTokens": 80},
+        "generationConfig": {
+            "temperature": 0.0,
+            "maxOutputTokens": 150,
+            "thinkingConfig": {"thinkingBudget": 0},
+        },
     }
     for attempt in range(3):
         r = requests.post(url, json=payload, timeout=30)
