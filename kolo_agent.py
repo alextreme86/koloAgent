@@ -10,6 +10,16 @@ Kolonihave Grass-Cutting Agent
 
 import os, json, time, datetime, subprocess, tempfile, requests, base64, math
 
+# Load .env if present (no external deps)
+_ENV = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".env")
+if os.path.exists(_ENV):
+    with open(_ENV) as _f:
+        for _l in _f:
+            _l = _l.strip()
+            if _l and not _l.startswith("#") and "=" in _l:
+                _k, _v = _l.split("=", 1)
+                os.environ.setdefault(_k.strip(), _v.strip())
+
 # ── Config ────────────────────────────────────────────────────────────────────
 
 GEMINI_API_KEY  = os.environ.get("GEMINI_API_KEY", "")
