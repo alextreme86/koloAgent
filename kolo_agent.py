@@ -312,9 +312,11 @@ MOISTURE_COMMENT_FILE  = os.path.join(os.path.dirname(os.path.abspath(__file__))
 
 _IRRIGATION_PROMPT = (
     "Irrigation controller, Danish garden (Hedehusene DK). Decide whether to water each zone.\n"
+    "NOTE: sensors are not placed directly at each plant, so readings may be drier or wetter than"
+    " the actual root zone. Apply a tolerance buffer — water a bit earlier rather than late.\n"
     "RULES:\n"
-    "- Greenhouse: water if any sensor <=55%. Ignore rain. Target 65-75%.\n"
-    "- Outdoor: water if any sensor <=45% AND rain_expected_24h=false AND rain_last_6h=false. Target 55-70%.\n"
+    "- Greenhouse: water if any sensor <=60%. Ignore rain. Target 70-80%.\n"
+    "- Outdoor: water if any sensor <=50% AND rain_expected_24h=false AND rain_last_6h=false. Target 60-75%.\n"
     "- Avoid 11:00-16:00 (peak evaporation) — check timestamp.\n"
     "- Always include a short comment and days estimate (~Xd) in the reason.\n"
     "Output EXACTLY 2 lines, no extra text, no blank lines:\n"
@@ -413,11 +415,13 @@ def analyse_moisture_with_gemini(soil: dict, weather: dict,
 
 _COMMENTARY_PROMPT = (
     "You are a helpful garden assistant for a kolonihave (Danish allotment) in Hedehusene.\n"
-    "Irrigation thresholds: greenhouse valve triggers at <=55% (target 65-75%), "
-    "outdoor valve triggers at <=45% (target 55-70%). Above those levels no watering is needed.\n"
+    "Irrigation thresholds: greenhouse valve triggers at <=60% (target 70-80%), "
+    "outdoor valve triggers at <=50% (target 60-75%). "
+    "Important: sensors are not placed directly at each plant so readings carry uncertainty — "
+    "err on the side of watering slightly early to avoid plant stress or damage.\n"
     "Based on the sensor data below, write a 2-3 sentence plain-text assessment.\n"
-    "Cover: current moisture for each zone, how far each is from its trigger threshold, "
-    "and when to expect the next watering to be needed. No markdown, no lists.\n"
+    "Cover: current moisture for each zone, how far from the trigger threshold, "
+    "and a realistic estimate of when watering will be needed. No markdown, no lists.\n"
 )
 
 
