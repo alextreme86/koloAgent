@@ -296,80 +296,22 @@ OBSERVATIONS: <one sentence about grass condition only>"""})
     return "Gemini error: max retries exceeded"
 
 
-_IRRIGATION_SYSTEM_PROMPT = """You are an irrigation decision assistant for a smart garden system \
-located in Hedehusene, Taastrup (Denmark, ~25km west of Copenhagen).
-Marine west coast climate (Cfb). Current month context matters for \
-evaporation and rain frequency.
-
-## SYSTEM SETUP
-- 2 irrigation zones, each with combined drip + nebulizer on a single valve
-- Greenhouse zone: fully enclosed, rain never enters, temperature controlled
-- Outdoor zone: exposed to weather, urban/suburban setting
-
-## SENSORS AVAILABLE
-Greenhouse zone:
-- Greenhouse soil moisture %
-- Greenhouse Basil soil moisture %
-- Greenhouse air temp (°C)
-- Greenhouse RH %
-
-Outdoor zone:
-- Bed 80cm soil moisture %
-- Strawberries soil moisture %
-- Germination Box soil moisture %
-- Outdoor air temp (°C)
-- Outdoor RH %
-- Outdoor pressure (hPa)
-
-## DECISION RULES
-
-### Greenhouse valve
-Trigger ON if:
-- ANY soil sensor drops to <= 65%
-- Run for 10 min (adjustable)
-- Target moisture: 75-80%
-- Ignore weather completely (rain irrelevant)
-
-### Outdoor valve
-Trigger ON only if BOTH:
-1. ANY soil sensor drops to <= 65%
-2. No rain expected in next 24h
-- Run for 10 min (adjustable)
-- Target moisture: 70-78%
-- Skip if rain occurred in last 6h
-
-## TIMING RULES
-- Best watering windows: early morning (06:00-10:00) or late afternoon (17:00-20:00)
-- Avoid midday (11:00-16:00): high evaporation, water loss before absorption
-- If moisture is marginal and current time is midday, set water_now=false and explain \
-  to water in evening instead
-- Timestamp is provided in the input — use it to determine time of day
-
-## YOUR TASK
-When called, you receive current sensor readings and a weather \
-forecast summary. You must respond ONLY with a JSON object, \
-no explanation, no markdown, exactly this structure:
-
-{
-  "greenhouse": {
-    "water_now": true or false,
-    "reason": "brief reason",
-    "duration_min": 10
-  },
-  "outdoor": {
-    "water_now": true or false,
-    "reason": "brief reason",
-    "duration_min": 10
-  }
-}"""
+_IRRIGATION_PROMPT = (
+    "Irrigation controller, Danish garden (Hedehusene DK). Decide whether to water each zone.\n"
+    "RULES:\n"
+    "- Greenhouse: water if any sensor <=65%. Ignore rain. Target 75-80%.\n"
+    "- Outdoor: water if any sensor <=65% AND rain_expected_24h=false AND rain_last_6h=false. Target 70-78%.\n"
+    "- Avoid 11:00-16:00 (peak evaporation) — check timestamp.\n"
+    "Reply with EXACTLY 2 lines, nothing else:\n"
+    "GH:YES:<short reason>  or  GH:NO:<short reason>\n"
+    "OD:YES:<short reason>  or  OD:NO:<short reason>"
+)
 
 
 def analyse_moisture_with_gemini(soil: dict, weather: dict,
                                   soil_rows=None, weather_rows=None, irr_rows=None,
                                   aqara: dict = None) -> dict | str:
-    """Build structured irrigation decision via Gemini. Returns dict on success, str on error."""
-    import re as _re
-
+    """Irrigation YES/NO decision via Gemini. Returns dict with greenhouse+outdoor keys."""
     def _soil(key):
         if soil_rows:
             for row in soil_rows:
@@ -393,48 +335,44 @@ def analyse_moisture_with_gemini(soil: dict, weather: dict,
     rain_today = float(_wf("rain_mm_today") or 0)
     rain_tmrw  = float(_wf("rain_tomorrow") or 0)
 
-    input_data = {
-        "timestamp": datetime.datetime.now().isoformat(timespec="seconds"),
-        "greenhouse": {
-            "temp_c":                  _aq("greenhouse", "temperature"),
-            "rh_percent":              _aq("greenhouse", "humidity"),
-            "pressure_hpa":            None,
-            "soil_greenhouse_percent": _soil("greenhouse"),
-            "soil_basil_percent":      _soil("greenhouse_basil"),
-        },
-        "outdoor": {
-            "temp_c":                    _aq("outdoor", "temperature") or _wf("temp_c"),
-            "rh_percent":                _aq("outdoor", "humidity")    or _wf("humidity"),
-            "pressure_hpa":              _aq("outdoor", "pressure"),
-            "soil_bed80_percent":        _soil("cassa_alta"),
-            "soil_strawberries_percent": _soil("fragole"),
-            "soil_germination_percent":  _soil("cassa_bassa_serra") or _soil("cassa_bassa"),
-            "rain_expected_24h":         rain_3h > 0.5 or rain_tmrw > 2.0,
-            "rain_last_6h":              rain_today > 0.5,
-        },
-    }
+    data = "\n".join([
+        f"timestamp: {datetime.datetime.now().isoformat(timespec='seconds')}",
+        f"gh_soil_greenhouse: {_soil('greenhouse')}%",
+        f"gh_soil_basil: {_soil('greenhouse_basil')}%",
+        f"gh_temp: {_aq('greenhouse','temperature')}C  gh_rh: {_aq('greenhouse','humidity')}%",
+        f"od_soil_bed80: {_soil('cassa_alta')}%",
+        f"od_soil_strawberries: {_soil('fragole')}%",
+        f"od_soil_germination: {_soil('cassa_bassa_serra') or _soil('cassa_bassa')}%",
+        f"od_temp: {_aq('outdoor','temperature') or _wf('temp_c')}C  od_rh: {_aq('outdoor','humidity') or _wf('humidity')}%",
+        f"rain_expected_24h: {rain_3h > 0.5 or rain_tmrw > 2.0}",
+        f"rain_last_6h: {rain_today > 0.5}",
+    ])
 
-    full_prompt = _IRRIGATION_SYSTEM_PROMPT + "\n\n" + json.dumps(input_data, indent=2)
     url = (f"https://generativelanguage.googleapis.com/v1beta/models/"
            f"gemini-2.5-flash:generateContent?key={GEMINI_API_KEY}")
     payload = {
-        "contents": [{"parts": [{"text": full_prompt}]}],
-        "generationConfig": {"temperature": 0.1, "maxOutputTokens": 300},
+        "contents": [{"parts": [{"text": _IRRIGATION_PROMPT + "\n\nDATA:\n" + data}]}],
+        "generationConfig": {"temperature": 0.0, "maxOutputTokens": 60},
     }
     for attempt in range(3):
         r = requests.post(url, json=payload, timeout=30)
         if r.status_code == 200:
             raw = r.json()["candidates"][0]["content"]["parts"][0]["text"].strip()
-            try:
-                return json.loads(raw)
-            except json.JSONDecodeError:
-                m = _re.search(r"\{.*\}", raw, _re.DOTALL)
-                if m:
-                    try:
-                        return json.loads(m.group())
-                    except Exception:
-                        pass
-            return raw
+            result = {
+                "greenhouse": {"water_now": False, "reason": "", "duration_min": 10},
+                "outdoor":    {"water_now": False, "reason": "", "duration_min": 10},
+            }
+            for line in raw.splitlines():
+                line = line.strip()
+                if line.upper().startswith("GH:"):
+                    parts = line.split(":", 2)
+                    result["greenhouse"]["water_now"] = parts[1].upper() == "YES"
+                    result["greenhouse"]["reason"] = parts[2] if len(parts) > 2 else ""
+                elif line.upper().startswith("OD:"):
+                    parts = line.split(":", 2)
+                    result["outdoor"]["water_now"] = parts[1].upper() == "YES"
+                    result["outdoor"]["reason"] = parts[2] if len(parts) > 2 else ""
+            return result
         if r.status_code == 429 and attempt < 2:
             time.sleep(20)
             continue
