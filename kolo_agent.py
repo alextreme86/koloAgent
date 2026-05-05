@@ -306,8 +306,9 @@ OBSERVATIONS: <one sentence about grass condition only>"""})
     return "Gemini error: max retries exceeded"
 
 
-OLLAMA_BASE       = "http://100.67.199.79:11434"
-OLLAMA_IRRIG_MODEL = "qwen3.5:4b"
+OLLAMA_BASE            = "http://100.67.199.79:11434"
+OLLAMA_IRRIG_MODEL     = "qwen3.5:4b"
+MOISTURE_COMMENT_FILE  = os.path.join(os.path.dirname(os.path.abspath(__file__)), "kolo_moisture_comment.json")
 
 _IRRIGATION_PROMPT = (
     "Irrigation controller, Danish garden (Hedehusene DK). Decide whether to water each zone.\n"
@@ -384,27 +385,7 @@ def analyse_moisture_with_gemini(soil: dict, weather: dict,
                 result["outdoor"]["reason"] = parts[2] if len(parts) > 2 else ""
         return result
 
-    # Try Ollama first (local, free)
-    try:
-        r = requests.post(
-            f"{OLLAMA_BASE}/api/chat",
-            json={
-                "model": OLLAMA_IRRIG_MODEL,
-                "messages": [{"role": "user", "content": prompt}],
-                "stream": False,
-                "think": False,
-                "options": {"temperature": 0.0, "num_predict": 120},
-            },
-            timeout=90,
-        )
-        if r.status_code == 200:
-            raw = r.json()["message"]["content"].strip()
-            print(f"  [irrigation] Ollama raw: {raw!r}")
-            return _parse(raw)
-    except Exception as e:
-        print(f"  [irrigation] Ollama unavailable: {e}")
-
-    # Fallback: Gemini (thinking disabled to avoid token waste)
+    # Gemini: thinking disabled so output is direct, no token waste
     url = (f"https://generativelanguage.googleapis.com/v1beta/models/"
            f"gemini-2.5-flash:generateContent?key={GEMINI_API_KEY}")
     payload = {
@@ -426,6 +407,88 @@ def analyse_moisture_with_gemini(soil: dict, weather: dict,
             continue
         return f"Gemini error {r.status_code}: {r.text[:200]}"
     return "Gemini error: max retries exceeded"
+
+
+# ── Moisture commentary (Ollama, runs 2×/day via cron) ───────────────────────
+
+_COMMENTARY_PROMPT = (
+    "You are a helpful garden assistant for a kolonihave (Danish allotment) in Hedehusene.\n"
+    "Based on the sensor data below, write a 2-3 sentence plain-text assessment.\n"
+    "Cover: current moisture status for each zone, anything that needs attention today,\n"
+    "and a practical suggestion (water now / wait / monitor). No markdown, no lists.\n"
+)
+
+
+def get_moisture_commentary(soil: dict, weather: dict,
+                             soil_rows=None, weather_rows=None, aqara: dict = None) -> str:
+    """Call Ollama for a natural-language moisture assessment. May take several minutes."""
+    def _soil(key):
+        if soil_rows:
+            for row in soil_rows:
+                z = row["zone"] if hasattr(row, "keys") else row[0]
+                if z == key:
+                    return row["moisture"] if hasattr(row, "keys") else row[1]
+        s = soil.get(key, {})
+        return s.get("moisture") if isinstance(s, dict) else None
+
+    def _aq(zone, field):
+        a = (aqara or {}).get(zone, {})
+        return a.get(field) if isinstance(a, dict) else None
+
+    if weather_rows:
+        w = weather_rows[0]
+        _wf = lambda k: w[k] if hasattr(w, "keys") else None
+    else:
+        _wf = lambda k: weather.get(k)
+
+    rain_3h    = float(_wf("rain_next_3h")  or 0)
+    rain_today = float(_wf("rain_mm_today") or 0)
+    rain_tmrw  = float(_wf("rain_tomorrow") or 0)
+
+    data = "\n".join([
+        f"timestamp: {datetime.datetime.now().isoformat(timespec='seconds')}",
+        f"gh_soil_greenhouse: {_soil('greenhouse')}%",
+        f"gh_soil_basil: {_soil('greenhouse_basil')}%",
+        f"gh_temp: {_aq('greenhouse','temperature')}C  gh_rh: {_aq('greenhouse','humidity')}%",
+        f"od_soil_bed80: {_soil('cassa_alta')}%",
+        f"od_soil_strawberries: {_soil('fragole')}%",
+        f"od_soil_germination: {_soil('cassa_bassa_serra') or _soil('cassa_bassa')}%",
+        f"od_temp: {_aq('outdoor','temperature') or _wf('temp_c')}C  od_rh: {_aq('outdoor','humidity') or _wf('humidity')}%",
+        f"rain_today: {rain_today}mm  rain_next3h: {rain_3h}mm  rain_tomorrow: {rain_tmrw}mm",
+    ])
+
+    try:
+        r = requests.post(
+            f"{OLLAMA_BASE}/api/chat",
+            json={
+                "model": OLLAMA_IRRIG_MODEL,
+                "messages": [{"role": "user", "content": _COMMENTARY_PROMPT + "\nDATA:\n" + data}],
+                "stream": False,
+                "think": False,
+                "options": {"temperature": 0.4, "num_predict": 220},
+            },
+            timeout=600,
+        )
+        if r.status_code == 200:
+            return r.json()["message"]["content"].strip()
+        print(f"  [moisture comment] Ollama HTTP {r.status_code}")
+    except Exception as e:
+        print(f"  [moisture comment] Ollama error: {e}")
+    return ""
+
+
+def save_moisture_commentary(comment: str):
+    with open(MOISTURE_COMMENT_FILE, "w") as f:
+        json.dump({"comment": comment,
+                   "ts": datetime.datetime.now().isoformat(timespec="seconds")}, f)
+
+
+def load_moisture_commentary() -> dict:
+    if os.path.exists(MOISTURE_COMMENT_FILE):
+        with open(MOISTURE_COMMENT_FILE) as f:
+            return json.load(f)
+    return {"comment": "", "ts": ""}
+
 
 # ── Indego ────────────────────────────────────────────────────────────────────
 

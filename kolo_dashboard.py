@@ -17,7 +17,7 @@ from kolo_agent import (
     analyse_with_gemini, analyse_moisture_with_gemini,
     load_state, should_mow_today,
     days_since_last_mow, start_mowing, pause_mowing, dock_mower,
-    record_daily_rain,
+    record_daily_rain, load_moisture_commentary,
 )
 from kolo_aqara import get_sensor_data as aqara_data
 from kolo_soil import get_soil_data, SENSORS as SOIL_SENSORS
@@ -195,6 +195,12 @@ def api_moisture_analysis():
     result = analyse_moisture_with_gemini(soil_live, w_live, soil_rows, weather_rows,
                                           aqara=aq_live)
     return jsonify({"result": result, "ts": datetime.datetime.now().isoformat()})
+
+
+@app.route("/api/moisture-comment")
+@require_auth
+def api_moisture_comment():
+    return jsonify(load_moisture_commentary())
 
 
 @app.route("/api/mower/<action>", methods=["POST"])
@@ -640,6 +646,20 @@ select{background:var(--ink2);border:1px solid var(--border2);border-radius:6px;
         </div>
       </div>
       <div class="analysis-box" id="analysis-txt"></div>
+    </div>
+  </div>
+
+  <!-- MOISTURE INSIGHT (Ollama commentary, updated 2×/day) -->
+  <div class="card card-full">
+    <div class="ch">
+      <div class="ch-dot ch-dot-blue"></div>
+      <span class="ch-title">Moisture insight</span>
+      <div class="ch-right">
+        <span style="font-size:10px;color:var(--fog4)" id="moisture-comment-ts"></span>
+      </div>
+    </div>
+    <div id="moisture-comment-txt" style="font-size:12px;color:var(--fog2);line-height:1.8;min-height:36px">
+      <span style="color:var(--fog4);font-style:italic">Awaiting morning or afternoon run…</span>
     </div>
   </div>
 
@@ -1102,12 +1122,26 @@ async function valveAction(name, action) {
   try { renderLog(window.__INIT__.log); } catch(e) { dbg("ERR renderLog: "+e); return; }
   dbg("init done");
 })();
+async function loadMoistureComment() {
+  try {
+    const r = await fetch("/api/moisture-comment" + Q, {headers: H});
+    const d = await r.json();
+    const el = document.getElementById("moisture-comment-txt");
+    const ts = document.getElementById("moisture-comment-ts");
+    if (d.comment) {
+      el.textContent = d.comment;
+      if (d.ts) ts.textContent = d.ts.slice(0, 10) + " " + d.ts.slice(11, 16);
+    }
+  } catch(e) {}
+}
+
 // Also try live API fetches (work when proxy forwards /api/*)
-loadStatus(); loadLog(); loadSensors(); loadValves();
-setInterval(loadStatus,   60000);
-setInterval(loadLog,     120000);
-setInterval(loadSensors, 120000);
-setInterval(loadValves,   30000);
+loadStatus(); loadLog(); loadSensors(); loadValves(); loadMoistureComment();
+setInterval(loadStatus,         60000);
+setInterval(loadLog,           120000);
+setInterval(loadSensors,       120000);
+setInterval(loadValves,         30000);
+setInterval(loadMoistureComment, 600000);  // refresh every 10 min
 // Full page reload every 5 min keeps embedded data fresh even if API calls fail
 setInterval(() => { location.reload(); }, 300000);
 </script>
