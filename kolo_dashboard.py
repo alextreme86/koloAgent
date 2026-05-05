@@ -627,7 +627,7 @@ select{background:var(--ink2);border:1px solid var(--border2);border-radius:6px;
               <div id="water-gh-icon" class="dec-x">&#x2715;</div>
               <div class="dec-title" id="water-gh-title" style="color:var(--red3)">&#x2014;</div>
             </div>
-            <div class="dec-reason" id="water-gh-reason">&#x2014;</div>
+            <div class="dec-reason" id="water-gh-reason" style="color:var(--fog2)">&#x2014;</div>
           </div>
           <div style="background:rgba(42,110,142,0.07);border:1px solid rgba(42,110,142,0.18);border-radius:10px;padding:10px">
             <div style="font-size:10px;text-transform:uppercase;letter-spacing:.06em;color:var(--fog4);margin-bottom:6px">Outdoor</div>
@@ -635,7 +635,7 @@ select{background:var(--ink2);border:1px solid var(--border2);border-radius:6px;
               <div id="water-od-icon" class="dec-x">&#x2715;</div>
               <div class="dec-title" id="water-od-title" style="color:var(--red3)">&#x2014;</div>
             </div>
-            <div class="dec-reason" id="water-od-reason">&#x2014;</div>
+            <div class="dec-reason" id="water-od-reason" style="color:var(--fog2)">&#x2014;</div>
           </div>
         </div>
       </div>
@@ -936,7 +936,8 @@ async function moistureStatus() {
           title.style.color = "var(--water2)";
         } else {
           icon.className = "dec-x"; icon.textContent = "\\u2715";
-          title.textContent = "Skip";
+          const days = (zone.reason || "").match(/~?(\\d+)\\s*d/i);
+          title.textContent = days ? "Skip (~" + days[1] + "d)" : "Skip";
           title.style.color = "var(--leaf3)";
         }
         reason.textContent = zone.reason || "";

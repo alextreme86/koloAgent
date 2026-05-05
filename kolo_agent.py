@@ -312,9 +312,10 @@ _IRRIGATION_PROMPT = (
     "- Greenhouse: water if any sensor <=65%. Ignore rain. Target 75-80%.\n"
     "- Outdoor: water if any sensor <=65% AND rain_expected_24h=false AND rain_last_6h=false. Target 70-78%.\n"
     "- Avoid 11:00-16:00 (peak evaporation) — check timestamp.\n"
+    "- If NO: estimate days until watering needed given current moisture, temp, RH (e.g. '~3d').\n"
     "Reply with EXACTLY 2 lines, nothing else:\n"
-    "GH:YES:<short reason>  or  GH:NO:<short reason>\n"
-    "OD:YES:<short reason>  or  OD:NO:<short reason>"
+    "GH:YES:<short reason>  or  GH:NO:<short reason, include ~Xd estimate>\n"
+    "OD:YES:<short reason>  or  OD:NO:<short reason, include ~Xd estimate>"
 )
 
 
