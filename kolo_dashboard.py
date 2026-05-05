@@ -176,7 +176,7 @@ def api_analyse():
 def api_moisture_analysis():
     import sqlite3 as _sq
     DB = os.path.join(os.path.dirname(os.path.abspath(__file__)), "kolo_data.db")
-    soil_rows, weather_rows = [], []
+    soil_rows, weather_rows, irr_rows = [], [], []
     if os.path.exists(DB):
         con = _sq.connect(DB)
         con.row_factory = _sq.Row
@@ -188,12 +188,17 @@ def api_moisture_analysis():
         weather_rows = con.execute(
             """SELECT * FROM weather_readings ORDER BY ts DESC LIMIT 1"""
         ).fetchall()
+        irr_rows = con.execute(
+            """SELECT zone, ts_open, duration_actual_s, moisture_before, moisture_after
+               FROM irrigation_events WHERE status='completed'
+               ORDER BY id DESC LIMIT 6"""
+        ).fetchall()
         con.close()
     soil_live = get_soil_data(use_cache=True) if not soil_rows else {}
     w_live    = get_weather()                  if not weather_rows else {}
     aq_live   = aqara_data(use_cache=True)
     result = analyse_moisture_with_gemini(soil_live, w_live, soil_rows, weather_rows,
-                                          aqara=aq_live)
+                                          irr_rows=irr_rows, aqara=aq_live)
     return jsonify({"result": result, "ts": datetime.datetime.now().isoformat()})
 
 

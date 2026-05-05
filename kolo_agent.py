@@ -312,19 +312,20 @@ MOISTURE_COMMENT_FILE  = os.path.join(os.path.dirname(os.path.abspath(__file__))
 
 _IRRIGATION_PROMPT = (
     "Irrigation controller, Danish garden (Hedehusene DK). Decide whether to water each zone.\n"
-    "NOTE: sensors are not placed directly at each plant, so readings may be drier or wetter than"
-    " the actual root zone. Apply a tolerance buffer — water a bit earlier rather than late.\n"
+    "NOTE: sensors are not placed directly at each plant — apply a tolerance buffer, water slightly early.\n"
     "RULES:\n"
-    "- Greenhouse: water if any sensor <=60%. Ignore rain. Target 70-80%.\n"
-    "- Outdoor: water if any sensor <=50% AND rain_expected_24h=false AND rain_last_6h=false. Target 60-75%.\n"
+    "- Greenhouse: water if any sensor <=60%. Ignore rain. Target 75%.\n"
+    "- Outdoor: water if any sensor <=50% AND rain_expected_24h=false AND rain_last_6h=false. Target 68%.\n"
     "- Avoid 11:00-16:00 (peak evaporation) — check timestamp.\n"
-    "- Always include a short comment and days estimate (~Xd) in the reason.\n"
-    "Output EXACTLY 2 lines, no extra text, no blank lines:\n"
-    "GH:YES:<reason>  or  GH:NO:<reason ~Xd>\n"
-    "OD:YES:<reason>  or  OD:NO:<reason ~Xd>\n"
+    "DURATION (only when YES): calculate minutes = (target - lowest_sensor) / rate_pct_per_min.\n"
+    "  Use historical rate from DATA if available; otherwise assume 2%/min for drip+nebulizer.\n"
+    "  Cap at 20min. Include as ~Xmin in the reason.\n"
+    "Output EXACTLY 2 lines, no extra text:\n"
+    "GH:YES:<reason including ~Xmin>  or  GH:NO:<reason ~Xd>\n"
+    "OD:YES:<reason including ~Xmin>  or  OD:NO:<reason ~Xd>\n"
     "Example:\n"
-    "GH:NO:sensors 68-72%, ok ~3d\n"
-    "OD:NO:rain expected, check ~2d"
+    "GH:YES:basil 54%, ~10min to reach 75%\n"
+    "OD:NO:all ok ~4d"
 )
 
 
@@ -355,15 +356,32 @@ def analyse_moisture_with_gemini(soil: dict, weather: dict,
     rain_today = float(_wf("rain_mm_today") or 0)
     rain_tmrw  = float(_wf("rain_tomorrow") or 0)
 
+    # Summarise last completed irrigation event per zone for rate calibration
+    irr_summary = {}
+    for row in (irr_rows or []):
+        zone = row["zone"] if hasattr(row, "keys") else row[0]
+        dur  = row["duration_actual_s"] if hasattr(row, "keys") else row[2]
+        mb   = row["moisture_before"]   if hasattr(row, "keys") else row[3]
+        ma   = row["moisture_after"]    if hasattr(row, "keys") else row[4]
+        ts   = row["ts_open"]           if hasattr(row, "keys") else row[1]
+        if zone not in irr_summary and dur and mb is not None and ma is not None and dur > 0:
+            rate = round((ma - mb) / (dur / 60), 2)
+            irr_summary[zone] = f"{ts[:10]}, {round(dur)}s, {mb}%->{ma}% (rate {rate}%/min)"
+
+    gh_irr = irr_summary.get("greenhouse", "no history — assume 2%/min")
+    od_irr = irr_summary.get("outdoor",    "no history — assume 2%/min")
+
     data = "\n".join([
         f"timestamp: {datetime.datetime.now().isoformat(timespec='seconds')}",
         f"gh_soil_greenhouse: {_soil('greenhouse')}%",
         f"gh_soil_basil: {_soil('greenhouse_basil')}%",
         f"gh_temp: {_aq('greenhouse','temperature')}C  gh_rh: {_aq('greenhouse','humidity')}%",
+        f"gh_last_irr: {gh_irr}",
         f"od_soil_bed80: {_soil('cassa_alta')}%",
         f"od_soil_strawberries: {_soil('fragole')}%",
         f"od_soil_germination: {_soil('cassa_bassa_serra') or _soil('cassa_bassa')}%",
         f"od_temp: {_aq('outdoor','temperature') or _wf('temp_c')}C  od_rh: {_aq('outdoor','humidity') or _wf('humidity')}%",
+        f"od_last_irr: {od_irr}",
         f"rain_expected_24h: {rain_3h > 0.5 or rain_tmrw > 2.0}",
         f"rain_last_6h: {rain_today > 0.5}",
     ])
@@ -371,20 +389,26 @@ def analyse_moisture_with_gemini(soil: dict, weather: dict,
     prompt = _IRRIGATION_PROMPT + "\n\nDATA:\n" + data
 
     def _parse(raw: str) -> dict:
+        import re as _re
         result = {
             "greenhouse": {"water_now": False, "reason": "", "duration_min": 10},
             "outdoor":    {"water_now": False, "reason": "", "duration_min": 10},
         }
         for line in raw.splitlines():
             line = line.strip()
+            key = None
             if line.upper().startswith("GH:"):
-                parts = line.split(":", 2)
-                result["greenhouse"]["water_now"] = parts[1].upper() == "YES"
-                result["greenhouse"]["reason"] = parts[2] if len(parts) > 2 else ""
+                key = "greenhouse"
             elif line.upper().startswith("OD:"):
+                key = "outdoor"
+            if key:
                 parts = line.split(":", 2)
-                result["outdoor"]["water_now"] = parts[1].upper() == "YES"
-                result["outdoor"]["reason"] = parts[2] if len(parts) > 2 else ""
+                result[key]["water_now"] = parts[1].upper() == "YES"
+                reason = parts[2] if len(parts) > 2 else ""
+                result[key]["reason"] = reason
+                m = _re.search(r"~?(\d+)\s*min", reason, _re.I)
+                if m:
+                    result[key]["duration_min"] = min(int(m.group(1)), 20)
         return result
 
     # Gemini: thinking disabled so output is direct, no token waste
