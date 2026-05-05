@@ -1,0 +1,10 @@
+.env
+*.log
+*.db
+*_state.json
+*_tokens.json
+kolo_pending.json
+__pycache__/
+*.pyc
+.DS_Store
+/tmp/

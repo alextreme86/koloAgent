@@ -1,0 +1,193 @@
+<mxfile host="app.diagrams.net" version="21.0.0">
+  <diagram name="Kolonihave Agent Architecture">
+    <mxGraphModel dx="1422" dy="762" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1654" pageHeight="1169" math="0" shadow="0">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+
+        <!-- ── CLOUD APIs group ── -->
+        <mxCell id="cloud" value="☁️ Cloud APIs" style="swimlane;startSize=30;fillColor=#dae8fc;strokeColor=#6c8ebf;fontStyle=1;fontSize=13;" vertex="1" parent="1">
+          <mxGeometry x="580" y="40" width="760" height="160" as="geometry" />
+        </mxCell>
+        <mxCell id="tuya" value="Tuya Cloud&#xa;WOOX Valves" style="rounded=1;fillColor=#fff2cc;strokeColor=#d6b656;" vertex="1" parent="cloud">
+          <mxGeometry x="20" y="55" width="120" height="60" as="geometry" />
+        </mxCell>
+        <mxCell id="aqara" value="Aqara Cloud&#xa;Temp + Humidity" style="rounded=1;fillColor=#fff2cc;strokeColor=#d6b656;" vertex="1" parent="cloud">
+          <mxGeometry x="160" y="55" width="120" height="60" as="geometry" />
+        </mxCell>
+        <mxCell id="indego" value="Bosch Indego&#xa;Mower API" style="rounded=1;fillColor=#fff2cc;strokeColor=#d6b656;" vertex="1" parent="cloud">
+          <mxGeometry x="300" y="55" width="120" height="60" as="geometry" />
+        </mxCell>
+        <mxCell id="wttr" value="wttr.in&#xa;Weather API" style="rounded=1;fillColor=#fff2cc;strokeColor=#d6b656;" vertex="1" parent="cloud">
+          <mxGeometry x="440" y="55" width="120" height="60" as="geometry" />
+        </mxCell>
+        <mxCell id="telegram" value="Telegram API&#xa;Bot + Notifications" style="rounded=1;fillColor=#fff2cc;strokeColor=#d6b656;" vertex="1" parent="cloud">
+          <mxGeometry x="600" y="55" width="130" height="60" as="geometry" />
+        </mxCell>
+
+        <!-- ── AgentMex group ── -->
+        <mxCell id="agentmex" value="🖥️ AgentMex — LangGraph Orchestrator" style="swimlane;startSize=30;fillColor=#d5e8d4;strokeColor=#82b366;fontStyle=1;fontSize=13;" vertex="1" parent="1">
+          <mxGeometry x="200" y="260" width="1140" height="420" as="geometry" />
+        </mxCell>
+
+        <!-- Gather nodes -->
+        <mxCell id="gather" value="Gather Context — parallel fan-out" style="swimlane;startSize=25;fillColor=#f5f5f5;strokeColor=#666666;fontStyle=1;fontSize=11;" vertex="1" parent="agentmex">
+          <mxGeometry x="20" y="50" width="500" height="150" as="geometry" />
+        </mxCell>
+        <mxCell id="gw" value="gather_weather&#xa;wttr.in + frost risk" style="rounded=1;fillColor=#f8cecc;strokeColor=#b85450;" vertex="1" parent="gather">
+          <mxGeometry x="15" y="55" width="100" height="60" as="geometry" />
+        </mxCell>
+        <mxCell id="gs" value="gather_sensors&#xa;Aqara + Tuya soil" style="rounded=1;fillColor=#f8cecc;strokeColor=#b85450;" vertex="1" parent="gather">
+          <mxGeometry x="130" y="55" width="100" height="60" as="geometry" />
+        </mxCell>
+        <mxCell id="gm" value="gather_mower&#xa;Indego state" style="rounded=1;fillColor=#f8cecc;strokeColor=#b85450;" vertex="1" parent="gather">
+          <mxGeometry x="250" y="55" width="100" height="60" as="geometry" />
+        </mxCell>
+        <mxCell id="gc" value="gather_camera&#xa;RTSP + vision" style="rounded=1;fillColor=#f8cecc;strokeColor=#b85450;" vertex="1" parent="gather">
+          <mxGeometry x="370" y="55" width="100" height="60" as="geometry" />
+        </mxCell>
+
+        <!-- Orchestrator -->
+        <mxCell id="orch" value="orchestrator_node&#xa;Ollama local LLM&#xa;(llama3.1:8b / qwen2.5:14b)&#xa;tool-calling reasoning" style="rounded=1;fillColor=#e1d5e7;strokeColor=#9673a6;fontStyle=1;fontSize=12;" vertex="1" parent="agentmex">
+          <mxGeometry x="430" y="250" width="200" height="100" as="geometry" />
+        </mxCell>
+
+        <!-- Tools -->
+        <mxCell id="tools" value="Specialized Tools" style="swimlane;startSize=25;fillColor=#f5f5f5;strokeColor=#666666;fontStyle=1;fontSize=11;" vertex="1" parent="agentmex">
+          <mxGeometry x="680" y="50" width="440" height="330" as="geometry" />
+        </mxCell>
+        <mxCell id="tm" value="mowing_tools&#xa;start · pause · dock" style="rounded=1;fillColor=#dae8fc;strokeColor=#6c8ebf;" vertex="1" parent="tools">
+          <mxGeometry x="30" y="50" width="130" height="60" as="geometry" />
+        </mxCell>
+        <mxCell id="tw" value="watering_tools&#xa;open_valve_1&#xa;open_valve_2 · close_all" style="rounded=1;fillColor=#dae8fc;strokeColor=#6c8ebf;" vertex="1" parent="tools">
+          <mxGeometry x="30" y="140" width="130" height="70" as="geometry" />
+        </mxCell>
+        <mxCell id="ta" value="alert_tools&#xa;send_message&#xa;send_photos" style="rounded=1;fillColor=#dae8fc;strokeColor=#6c8ebf;" vertex="1" parent="tools">
+          <mxGeometry x="30" y="240" width="130" height="60" as="geometry" />
+        </mxCell>
+
+        <!-- kolo_bot -->
+        <mxCell id="bot" value="kolo_bot.py&#xa;Telegram Bot&#xa;triggers graph" style="rounded=1;fillColor=#e1d5e7;strokeColor=#9673a6;" vertex="1" parent="agentmex">
+          <mxGeometry x="20" y="290" width="130" height="70" as="geometry" />
+        </mxCell>
+
+        <!-- ── Pi Zero group ── -->
+        <mxCell id="pizero" value="🔌 Pi Zero kolo — Edge Device (100.92.207.62 Tailscale)" style="swimlane;startSize=30;fillColor=#ffe6cc;strokeColor=#d79b00;fontStyle=1;fontSize=13;" vertex="1" parent="1">
+          <mxGeometry x="20" y="260" width="160" height="260" as="geometry" />
+        </mxCell>
+        <mxCell id="cam1" value="Camera 115&#xa;Garden PTZ" style="rounded=1;fillColor=#fff2cc;strokeColor=#d6b656;" vertex="1" parent="pizero">
+          <mxGeometry x="20" y="50" width="120" height="50" as="geometry" />
+        </mxCell>
+        <mxCell id="cam2" value="Camera 102&#xa;Greenhouse PTZ" style="rounded=1;fillColor=#fff2cc;strokeColor=#d6b656;" vertex="1" parent="pizero">
+          <mxGeometry x="20" y="120" width="120" height="50" as="geometry" />
+        </mxCell>
+        <mxCell id="watchdog" value="watchdog_valves.py&#xa;Cron 5min&#xa;Close if no internet" style="rounded=1;fillColor=#f8cecc;strokeColor=#b85450;fontSize=10;" vertex="1" parent="pizero">
+          <mxGeometry x="20" y="190" width="120" height="55" as="geometry" />
+        </mxCell>
+
+        <!-- ── Actuators group ── -->
+        <mxCell id="actuators" value="⚙️ Actuators" style="swimlane;startSize=30;fillColor=#f5f5f5;strokeColor=#666666;fontStyle=1;fontSize=13;" vertex="1" parent="1">
+          <mxGeometry x="580" y="740" width="420" height="160" as="geometry" />
+        </mxCell>
+        <mxCell id="valve1" value="WOOX Valve 1&#xa;Raised Beds" style="rounded=1;fillColor=#d5e8d4;strokeColor=#82b366;" vertex="1" parent="actuators">
+          <mxGeometry x="30" y="55" width="120" height="60" as="geometry" />
+        </mxCell>
+        <mxCell id="valve2" value="WOOX Valve 2&#xa;Greenhouse" style="rounded=1;fillColor=#d5e8d4;strokeColor=#82b366;" vertex="1" parent="actuators">
+          <mxGeometry x="170" y="55" width="120" height="60" as="geometry" />
+        </mxCell>
+        <mxCell id="mower" value="Bosch Indego&#xa;Robot Mower" style="rounded=1;fillColor=#d5e8d4;strokeColor=#82b366;" vertex="1" parent="actuators">
+          <mxGeometry x="310" y="55" width="80" height="60" as="geometry" />
+        </mxCell>
+
+        <!-- ── Sensors group ── -->
+        <mxCell id="sensors" value="📡 Sensors" style="swimlane;startSize=30;fillColor=#f5f5f5;strokeColor=#666666;fontStyle=1;fontSize=13;" vertex="1" parent="1">
+          <mxGeometry x="1060" y="740" width="280" height="160" as="geometry" />
+        </mxCell>
+        <mxCell id="aqsens" value="Aqara Sensors&#xa;Kolonihavehus&#xa;+ Greenhouse" style="rounded=1;fillColor=#fff2cc;strokeColor=#d6b656;" vertex="1" parent="sensors">
+          <mxGeometry x="20" y="50" width="100" height="70" as="geometry" />
+        </mxCell>
+        <mxCell id="soilsens" value="Tuya Soil x3&#xa;GH · Bed40 · Bed80" style="rounded=1;fillColor=#fff2cc;strokeColor=#d6b656;" vertex="1" parent="sensors">
+          <mxGeometry x="150" y="50" width="110" height="70" as="geometry" />
+        </mxCell>
+
+        <!-- ── Edges ── -->
+
+        <!-- Telegram → bot → graph -->
+        <mxCell id="e1" style="edgeStyle=orthogonalEdgeStyle;" edge="1" source="telegram" target="bot" parent="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e2" value="triggers" style="edgeStyle=orthogonalEdgeStyle;" edge="1" source="bot" target="orch" parent="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+
+        <!-- gather → cloud -->
+        <mxCell id="e3" style="edgeStyle=orthogonalEdgeStyle;" edge="1" source="gw" target="wttr" parent="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e4" style="edgeStyle=orthogonalEdgeStyle;" edge="1" source="gs" target="aqara" parent="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e5" style="edgeStyle=orthogonalEdgeStyle;" edge="1" source="gs" target="tuya" parent="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e6" style="edgeStyle=orthogonalEdgeStyle;" edge="1" source="gm" target="indego" parent="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+
+        <!-- gc → Pi Zero (SSH) -->
+        <mxCell id="e7" value="SSH + ffmpeg&#xa;Tailscale" style="edgeStyle=orthogonalEdgeStyle;dashed=1;" edge="1" source="gc" target="pizero" parent="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+
+        <!-- gather → orchestrator -->
+        <mxCell id="e8" value="full context" style="edgeStyle=orthogonalEdgeStyle;" edge="1" source="gather" target="orch" parent="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+
+        <!-- orchestrator → tools -->
+        <mxCell id="e9" value="tool calls" style="edgeStyle=orthogonalEdgeStyle;" edge="1" source="orch" target="tools" parent="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+
+        <!-- tools → cloud -->
+        <mxCell id="e10" style="edgeStyle=orthogonalEdgeStyle;" edge="1" source="tm" target="indego" parent="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e11" style="edgeStyle=orthogonalEdgeStyle;" edge="1" source="tw" target="tuya" parent="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e12" style="edgeStyle=orthogonalEdgeStyle;" edge="1" source="ta" target="telegram" parent="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+
+        <!-- cloud → actuators -->
+        <mxCell id="e13" style="edgeStyle=orthogonalEdgeStyle;" edge="1" source="tuya" target="valve1" parent="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e14" style="edgeStyle=orthogonalEdgeStyle;" edge="1" source="tuya" target="valve2" parent="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e15" style="edgeStyle=orthogonalEdgeStyle;" edge="1" source="indego" target="mower" parent="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+
+        <!-- sensors → cloud -->
+        <mxCell id="e16" style="edgeStyle=orthogonalEdgeStyle;" edge="1" source="aqsens" target="aqara" parent="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e17" style="edgeStyle=orthogonalEdgeStyle;" edge="1" source="soilsens" target="tuya" parent="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+
+        <!-- watchdog → valves (local) -->
+        <mxCell id="e18" value="local tinytuya&#xa;(safety)" style="edgeStyle=orthogonalEdgeStyle;dashed=1;strokeColor=#b85450;" edge="1" source="watchdog" target="valve1" parent="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e19" style="edgeStyle=orthogonalEdgeStyle;dashed=1;strokeColor=#b85450;" edge="1" source="watchdog" target="valve2" parent="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>
