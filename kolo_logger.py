@@ -16,7 +16,7 @@ sys.path.insert(0, os.path.dirname(__file__))
 from kolo_soil       import get_soil_data, SENSORS as SOIL_SENSORS
 from kolo_aqara      import get_sensor_data as aqara_data
 from kolo_irrigation import get_all_valve_status
-from kolo_agent      import get_weather
+from kolo_agent      import get_weather, send_telegram_message, STOP_THRESHOLD
 
 DB_PATH    = os.path.join(os.path.dirname(__file__), "kolo_data.db")
 STATE_PATH = os.path.join(os.path.dirname(__file__), "kolo_logger_state.json")
@@ -222,6 +222,18 @@ def check_valves(conn: sqlite3.Connection, ts: str, valves: dict,
             print(f"  Irrigation OPEN: {zone} requested={countdown}s moisture_before={avg_m}% "
                   f"zone_air={zone_air_t}°C/{zone_air_hum}%")
 
+        elif is_open and was_open:
+            # Valve still open → check stop threshold, notify once per session
+            stop_pct = STOP_THRESHOLD.get(zone)
+            already_notified = prev.get(zone, {}).get("stop_notified", False)
+            if stop_pct and avg_m is not None and avg_m >= stop_pct and not already_notified:
+                msg = (f"💧 {zone.capitalize()} irrigation stop alert\n"
+                       f"Moisture reached {avg_m}% (stop threshold {stop_pct}%).\n"
+                       f"Consider closing the valve now.")
+                send_telegram_message(msg)
+                prev.setdefault(zone, {})["stop_notified"] = True
+                print(f"  Stop alert sent: {zone} at {avg_m}% >= {stop_pct}%")
+
         elif not is_open and was_open:
             # Valve just closed → compute duration and snapshot moisture_after
             open_ts = prev.get(zone, {}).get("open_ts")
@@ -246,6 +258,7 @@ def check_valves(conn: sqlite3.Connection, ts: str, valves: dict,
             )
             conn.commit()
             prev.get(zone, {}).pop("open_ts", None)
+            prev.get(zone, {}).pop("stop_notified", None)
             print(f"  Irrigation CLOSE: {zone} duration={duration_actual}s moisture_after={avg_m}%")
 
         # Always record current open state

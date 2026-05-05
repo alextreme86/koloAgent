@@ -310,12 +310,15 @@ OLLAMA_BASE            = "http://100.67.199.79:11434"
 OLLAMA_IRRIG_MODEL     = "qwen3.5:4b"
 MOISTURE_COMMENT_FILE  = os.path.join(os.path.dirname(os.path.abspath(__file__)), "kolo_moisture_comment.json")
 
+# Irrigation stop thresholds — send Telegram alert when exceeded during active watering
+STOP_THRESHOLD = {"greenhouse": 80, "outdoor": 75}
+
 _IRRIGATION_PROMPT = (
     "Irrigation controller, Danish garden (Hedehusene DK). Decide whether to water each zone.\n"
     "NOTE: sensors are not placed directly at each plant — apply a tolerance buffer, water slightly early.\n"
     "RULES:\n"
-    "- Greenhouse: water if any sensor <=58%. Ignore rain. Target 75%.\n"
-    "- Outdoor: water if any sensor <=55% AND rain_expected_24h=false AND rain_last_6h=false. Target 68%.\n"
+    "- Greenhouse: water if any sensor <=58%. Ignore rain. Target 75%. Stop at 80%.\n"
+    "- Outdoor: water if any sensor <=55% AND rain_expected_24h=false AND rain_last_6h=false. Target 68%. Stop at 75%.\n"
     "- Avoid 11:00-16:00 (peak evaporation) — check timestamp.\n"
     "DURATION (only when YES): calculate minutes = (target - lowest_sensor) / rate_pct_per_min.\n"
     "  Use historical rate from DATA if available; otherwise assume 2%/min for drip+nebulizer.\n"
