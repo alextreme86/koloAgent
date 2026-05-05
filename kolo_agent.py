@@ -314,7 +314,7 @@ _IRRIGATION_PROMPT = (
     "Irrigation controller, Danish garden (Hedehusene DK). Decide whether to water each zone.\n"
     "NOTE: sensors are not placed directly at each plant — apply a tolerance buffer, water slightly early.\n"
     "RULES:\n"
-    "- Greenhouse: water if any sensor <=60%. Ignore rain. Target 75%.\n"
+    "- Greenhouse: water if any sensor <=58%. Ignore rain. Target 75%.\n"
     "- Outdoor: water if any sensor <=50% AND rain_expected_24h=false AND rain_last_6h=false. Target 68%.\n"
     "- Avoid 11:00-16:00 (peak evaporation) — check timestamp.\n"
     "DURATION (only when YES): calculate minutes = (target - lowest_sensor) / rate_pct_per_min.\n"
@@ -439,7 +439,7 @@ def analyse_moisture_with_gemini(soil: dict, weather: dict,
 
 _COMMENTARY_PROMPT = (
     "You are a helpful garden assistant for a kolonihave (Danish allotment) in Hedehusene.\n"
-    "Irrigation thresholds: greenhouse valve triggers at <=60% (target 70-80%), "
+    "Irrigation thresholds: greenhouse valve triggers at <=58% (target 70-80%), "
     "outdoor valve triggers at <=50% (target 60-75%). "
     "Important: sensors are not placed directly at each plant so readings carry uncertainty — "
     "err on the side of watering slightly early to avoid plant stress or damage.\n"
