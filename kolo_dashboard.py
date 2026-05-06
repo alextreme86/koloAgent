@@ -1230,7 +1230,7 @@ async function loadMoistureHistory() {
     const days = [...new Set([...ghData.map(p=>p.day), ...odData.map(p=>p.day)])].sort();
     const ghMap = Object.fromEntries(ghData.map(p=>[p.day, p.avg]));
     const odMap = Object.fromEntries(odData.map(p=>[p.day, p.avg]));
-    const labels = days.map(d => d.slice(5)); // MM-DD
+    const labels = days.map(d => d.slice(8) + "/" + d.slice(5,7)); // DD/MM
     const ghVals = days.map(d => ghMap[d] ?? null);
     const odVals = days.map(d => odMap[d] ?? null);
     const ctx = document.getElementById("moisture-chart");
