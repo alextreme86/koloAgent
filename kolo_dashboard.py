@@ -210,6 +210,32 @@ def api_moisture_comment():
     return jsonify(load_moisture_commentary())
 
 
+@app.route("/api/moisture-history")
+@require_auth
+def api_moisture_history():
+    import sqlite3 as _sq
+    DB = os.path.join(os.path.dirname(os.path.abspath(__file__)), "kolo_data.db")
+    if not os.path.exists(DB):
+        return jsonify({"greenhouse": [], "outdoor": []})
+    GH = ("greenhouse", "greenhouse_basil")
+    OD = ("cassa_alta", "fragole", "cassa_bassa_serra", "cassa_bassa")
+    con = _sq.connect(DB)
+    con.row_factory = _sq.Row
+    def daily_avg(sensors):
+        ph = ",".join("?" * len(sensors))
+        rows = con.execute(f"""
+            SELECT date(ts) as day, round(avg(moisture),1) as avg_m
+            FROM sensor_readings
+            WHERE zone IN ({ph}) AND moisture IS NOT NULL
+              AND ts >= date('now','-14 days')
+            GROUP BY date(ts) ORDER BY day
+        """, sensors).fetchall()
+        return [{"day": r["day"], "avg": r["avg_m"]} for r in rows]
+    result = {"greenhouse": daily_avg(GH), "outdoor": daily_avg(OD)}
+    con.close()
+    return jsonify(result)
+
+
 @app.route("/api/mower/<action>", methods=["POST"])
 @require_auth
 def api_mower_action(action):
@@ -532,6 +558,7 @@ select{background:var(--ink2);border:1px solid var(--border2);border-radius:6px;
   .climate-cards{grid-template-columns:1fr !important}
 }
 </style>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4/dist/chart.umd.min.js"></script>
 </head>
 <body>
 
@@ -746,6 +773,13 @@ select{background:var(--ink2);border:1px solid var(--border2);border-radius:6px;
         <div class="zone-lbl">Valve</div>
         <div id="out-valve"><div style="color:var(--fog4);font-size:11px">Loading…</div></div>
         <div id="od-irr-cal" style="font-size:10px;color:var(--fog4);margin-top:5px">—</div>
+      </div>
+    </div>
+    <!-- Moisture history chart -->
+    <div style="margin-top:18px">
+      <div style="font-size:9px;text-transform:uppercase;letter-spacing:.06em;color:var(--fog4);margin-bottom:8px">Avg daily moisture — last 14 days</div>
+      <div style="position:relative;height:120px">
+        <canvas id="moisture-chart"></canvas>
       </div>
     </div>
   </div>
@@ -1185,13 +1219,64 @@ async function loadMoistureComment() {
   } catch(e) {}
 }
 
+let _moistureChart = null;
+async function loadMoistureHistory() {
+  try {
+    const r = await fetch("/api/moisture-history" + Q, {headers: H});
+    if (!r.ok) return;
+    const d = await r.json();
+    const ghData = d.greenhouse || [], odData = d.outdoor || [];
+    // Build unified day labels from both series
+    const days = [...new Set([...ghData.map(p=>p.day), ...odData.map(p=>p.day)])].sort();
+    const ghMap = Object.fromEntries(ghData.map(p=>[p.day, p.avg]));
+    const odMap = Object.fromEntries(odData.map(p=>[p.day, p.avg]));
+    const labels = days.map(d => d.slice(5)); // MM-DD
+    const ghVals = days.map(d => ghMap[d] ?? null);
+    const odVals = days.map(d => odMap[d] ?? null);
+    const ctx = document.getElementById("moisture-chart");
+    if (!ctx) return;
+    if (_moistureChart) _moistureChart.destroy();
+    _moistureChart = new Chart(ctx, {
+      type: "line",
+      data: {
+        labels,
+        datasets: [
+          { label: "Greenhouse", data: ghVals, borderColor: "rgba(42,110,142,0.9)",
+            backgroundColor: "rgba(42,110,142,0.12)", fill: true,
+            tension: 0.35, pointRadius: 3, pointBackgroundColor: "rgba(42,110,142,0.9)",
+            spanGaps: true },
+          { label: "Outdoor", data: odVals, borderColor: "rgba(184,122,8,0.9)",
+            backgroundColor: "rgba(184,122,8,0.10)", fill: true,
+            tension: 0.35, pointRadius: 3, pointBackgroundColor: "rgba(184,122,8,0.9)",
+            spanGaps: true }
+        ]
+      },
+      options: {
+        responsive: true, maintainAspectRatio: false, animation: false,
+        plugins: {
+          legend: { labels: { color: "rgba(184,204,181,0.7)", font: { family: "'DM Mono',monospace", size: 10 }, boxWidth: 10, padding: 12 } },
+          tooltip: { backgroundColor: "#1f301d", titleColor: "#8dd484", bodyColor: "#b8ccb5",
+                      callbacks: { label: c => " " + c.dataset.label + ": " + c.parsed.y + "%" } }
+        },
+        scales: {
+          x: { ticks: { color: "rgba(96,120,96,0.8)", font: { family: "'DM Mono',monospace", size: 9 } },
+               grid: { color: "rgba(90,158,82,0.08)" } },
+          y: { min: 0, max: 100, ticks: { color: "rgba(96,120,96,0.8)", font: { family: "'DM Mono',monospace", size: 9 },
+               callback: v => v + "%" }, grid: { color: "rgba(90,158,82,0.08)" } }
+        }
+      }
+    });
+  } catch(e) {}
+}
+
 // Also try live API fetches (work when proxy forwards /api/*)
-loadStatus(); loadLog(); loadSensors(); loadValves(); loadMoistureComment();
+loadStatus(); loadLog(); loadSensors(); loadValves(); loadMoistureComment(); loadMoistureHistory();
 setInterval(loadStatus,         60000);
 setInterval(loadLog,           120000);
 setInterval(loadSensors,       120000);
 setInterval(loadValves,         30000);
-setInterval(loadMoistureComment, 600000);  // refresh every 10 min
+setInterval(loadMoistureComment,   600000);
+setInterval(loadMoistureHistory,   600000);
 // Full page reload every 5 min keeps embedded data fresh even if API calls fail
 setInterval(() => { location.reload(); }, 300000);
 </script>
