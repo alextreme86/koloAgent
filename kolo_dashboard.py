@@ -1287,8 +1287,8 @@ function loadGrassSnaps() {
   const t = Date.now();
   const i1 = document.getElementById("grass-snap-1");
   const i2 = document.getElementById("grass-snap-2");
-  if (i1) i1.src = "/api/grass-snap/1" + Q + "&t=" + t;
-  if (i2) i2.src = "/api/grass-snap/2" + Q + "&t=" + t;
+  if (i1) i1.src = "/api/grass-snap/1?t=" + t;
+  if (i2) i2.src = "/api/grass-snap/2?t=" + t;
 }
 
 // Also try live API fetches (work when proxy forwards /api/*)
