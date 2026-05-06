@@ -41,7 +41,9 @@ INDEGO_ALM_SN   = "326602963"
 
 # ── Scheduling config ─────────────────────────────────────────────────────────
 MIN_DAYS_BETWEEN_MOWS = 3      # don't mow more often than this
-STATE_FILE = os.path.join(os.path.dirname(__file__), "kolo_state.json")
+STATE_FILE      = os.path.join(os.path.dirname(__file__), "kolo_state.json")
+GRASS_SNAP_1    = os.path.join(os.path.dirname(__file__), "grass_snap_1.jpg")
+GRASS_SNAP_2    = os.path.join(os.path.dirname(__file__), "grass_snap_2.jpg")
 
 CAMERAS = [
     # Garden (192.168.1.115) removed — not on LAN, re-add when reconnected
@@ -129,6 +131,20 @@ def ptz_move(ip: str, direction: str, duration: float, speed: int = CAM_PAN_SPEE
     except Exception as e:
         print(f"  [ptz_move] {ip} error: {e}")
         return False
+
+
+def save_grass_snaps(snaps: list):
+    """Crop the two Garden PTZ shots to grass area and persist them for the dashboard."""
+    from PIL import Image as _PIL
+    garden = [s for s in snaps if s["ok"] and "garden" in s["name"].lower()]
+    for i, snap in enumerate(garden[:2]):
+        try:
+            img = _PIL.open(snap["path"])
+            w, h = img.size
+            cropped = img.crop((0, int(h * 0.28), w, int(h * 0.88)))
+            cropped.save([GRASS_SNAP_1, GRASS_SNAP_2][i], "JPEG", quality=85)
+        except Exception as e:
+            print(f"  [WARN] grass snap {i+1}: {e}")
 
 
 def capture_all_snapshots(tmpdir: str) -> list:
@@ -790,6 +806,7 @@ def main(trigger_mow: bool = False):
         snaps = capture_all_snapshots(tmpdir)
         ok_count = sum(1 for s in snaps if s["ok"])
         print(f"  {ok_count}/{len(snaps)} snapshots captured.")
+        save_grass_snaps(snaps)
 
         # 2. Weather
         print("\n[2/4] Fetching weather...")

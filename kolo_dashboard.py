@@ -204,6 +204,16 @@ def api_moisture_analysis():
     return jsonify({"result": result, "ts": datetime.datetime.now().isoformat()})
 
 
+@app.route("/api/grass-snap/<int:n>")
+@require_auth
+def api_grass_snap(n):
+    paths = {1: "grass_snap_1.jpg", 2: "grass_snap_2.jpg"}
+    p = os.path.join(os.path.dirname(os.path.abspath(__file__)), paths.get(n, "grass_snap_1.jpg"))
+    if not os.path.exists(p):
+        abort(404)
+    return send_file(p, mimetype="image/jpeg", max_age=0)
+
+
 @app.route("/api/moisture-comment")
 @require_auth
 def api_moisture_comment():
@@ -657,6 +667,10 @@ select{background:var(--ink2);border:1px solid var(--border2);border-radius:6px;
         <div class="dec-title" id="dec-title" style="color:var(--red3)">—</div>
       </div>
       <div class="dec-reason" id="dec-reason">Loading…</div>
+      <div id="grass-snap-wrap" style="margin-top:10px;display:grid;grid-template-columns:1fr 1fr;gap:4px;border-radius:8px;overflow:hidden">
+        <img id="grass-snap-1" style="width:100%;height:80px;object-fit:cover;display:block" onerror="this.parentElement.style.display='none'">
+        <img id="grass-snap-2" style="width:100%;height:80px;object-fit:cover;display:block" onerror="this.style.display='none'">
+      </div>
     </div>
   </div>
 
@@ -1269,14 +1283,23 @@ async function loadMoistureHistory() {
   } catch(e) {}
 }
 
+function loadGrassSnaps() {
+  const t = Date.now();
+  const i1 = document.getElementById("grass-snap-1");
+  const i2 = document.getElementById("grass-snap-2");
+  if (i1) i1.src = "/api/grass-snap/1" + Q + "&t=" + t;
+  if (i2) i2.src = "/api/grass-snap/2" + Q + "&t=" + t;
+}
+
 // Also try live API fetches (work when proxy forwards /api/*)
-loadStatus(); loadLog(); loadSensors(); loadValves(); loadMoistureComment(); loadMoistureHistory();
+loadStatus(); loadLog(); loadSensors(); loadValves(); loadMoistureComment(); loadMoistureHistory(); loadGrassSnaps();
 setInterval(loadStatus,         60000);
 setInterval(loadLog,           120000);
 setInterval(loadSensors,       120000);
 setInterval(loadValves,         30000);
 setInterval(loadMoistureComment,   600000);
 setInterval(loadMoistureHistory,   600000);
+setInterval(loadGrassSnaps,       3600000);
 // Full page reload every 5 min keeps embedded data fresh even if API calls fail
 setInterval(() => { location.reload(); }, 300000);
 </script>
