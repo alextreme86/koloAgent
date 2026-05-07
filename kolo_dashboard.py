@@ -246,6 +246,22 @@ def api_moisture_history():
     return jsonify(result)
 
 
+@app.route("/api/mower-status")
+@require_auth
+def api_mower_status():
+    """Lightweight live mower state — no weather, no full status, fast."""
+    indego = get_indego_state()
+    state_map = {258: "Docked", 257: "Charging", 1: "Mowing", 64513: "Offline"}
+    code  = indego.get("state")
+    label = state_map.get(code, f"Unknown ({code})")
+    return jsonify({
+        "state":     label,
+        "state_code": code,
+        "mowed_pct": indego.get("mowed", 0),
+        "error":     indego.get("error"),
+    })
+
+
 @app.route("/api/mower/<action>", methods=["POST"])
 @require_auth
 def api_mower_action(action):
@@ -1062,12 +1078,47 @@ async function moistureStatus() {
   } catch(e) { txt.style.display = "block"; txt.textContent = "Error: " + e; }
 }
 
+let _mowerPollTimer = null;
+async function refreshMowerState() {
+  try {
+    const r = await fetch("/api/mower-status?t=" + Date.now(), {headers: H});
+    if (!r.ok) return;
+    const d = await r.json();
+    const ms = d.state || "Unknown";
+    const pct = d.mowed_pct ?? 0;
+    const isMowing   = ms === "Mowing";
+    const isCharging = ms === "Charging";
+    const stateColor = isMowing ? "var(--leaf3)" : isCharging ? "var(--amber3)" : "var(--red3)";
+    const dotColor   = isMowing ? "var(--leaf3)" : isCharging ? "var(--amber2)" : "var(--red2)";
+    document.getElementById("mower-state").textContent = ms;
+    document.getElementById("mower-state").style.color = stateColor;
+    if (document.getElementById("mower-ch-dot"))
+      document.getElementById("mower-ch-dot").style.background = dotColor;
+    document.getElementById("mow-pct-lbl").textContent = pct + "%";
+    document.getElementById("mow-fill").style.width = pct + "%";
+    const pill = document.getElementById("mower-pill");
+    const pillDot = document.getElementById("mower-pill-dot");
+    if (pill) pill.className = isMowing ? "status-pill pill-green" : isCharging ? "status-pill pill-amber" : "status-pill pill-red";
+    if (pillDot) pillDot.className = isMowing ? "pill-dot pill-dot-green" : isCharging ? "pill-dot pill-dot-amber" : "pill-dot pill-dot-red";
+    if (document.getElementById("mower-pill-txt"))
+      document.getElementById("mower-pill-txt").textContent = "Mower " + ms;
+  } catch(e) {}
+}
+function startMowerPolling() {
+  if (_mowerPollTimer) clearInterval(_mowerPollTimer);
+  let ticks = 0;
+  _mowerPollTimer = setInterval(async () => {
+    await refreshMowerState();
+    if (++ticks >= 12) { clearInterval(_mowerPollTimer); _mowerPollTimer = null; }
+  }, 5000);
+}
 async function mowerAction(action) {
   toast("Sending to Telegram for confirmation…");
+  await refreshMowerState();
   try {
     const r = await fetch(`/api/mower/${action}` + Q, {method:"POST", headers: H});
     const d = await r.json();
-    if (d.status === "pending") pollAction(d.token, () => setTimeout(loadStatus, 2000));
+    if (d.status === "pending") pollAction(d.token, () => { refreshMowerState(); startMowerPolling(); });
   } catch(e) { toast("Error: " + e, false); }
 }
 
@@ -1292,8 +1343,9 @@ function loadGrassSnaps() {
 }
 
 // Also try live API fetches (work when proxy forwards /api/*)
-loadStatus(); loadLog(); loadSensors(); loadValves(); loadMoistureComment(); loadMoistureHistory(); loadGrassSnaps();
+loadStatus(); loadLog(); loadSensors(); loadValves(); loadMoistureComment(); loadMoistureHistory(); loadGrassSnaps(); refreshMowerState();
 setInterval(loadStatus,         60000);
+setInterval(refreshMowerState,  30000);
 setInterval(loadLog,           120000);
 setInterval(loadSensors,       120000);
 setInterval(loadValves,         30000);
