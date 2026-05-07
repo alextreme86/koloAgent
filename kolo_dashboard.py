@@ -123,7 +123,8 @@ def _collect_status() -> dict:
     w       = get_weather()
     indego  = get_indego_state()
     state   = load_state()
-    state_map = {258: "Docked", 257: "Charging", 1: "Mowing", 64513: "Offline"}
+    state_map = {258: "Docked", 257: "Charging", 1: "Mowing",
+                 513: "Leaving dock", 512: "Paused", 514: "Mowing", 64513: "Offline"}
     mower_state = state_map.get(indego.get("state"), f"Unknown ({indego.get('state','?')})")
     mowed_pct   = indego.get("mowed", 0)
     days_ago    = days_since_last_mow(state)
@@ -251,7 +252,8 @@ def api_moisture_history():
 def api_mower_status():
     """Lightweight live mower state — no weather, no full status, fast."""
     indego = get_indego_state()
-    state_map = {258: "Docked", 257: "Charging", 1: "Mowing", 64513: "Offline"}
+    state_map = {258: "Docked", 257: "Charging", 1: "Mowing",
+                 513: "Leaving dock", 512: "Paused", 514: "Mowing", 64513: "Offline"}
     code  = indego.get("state")
     label = state_map.get(code, f"Unknown ({code})")
     return jsonify({

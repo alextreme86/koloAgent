@@ -162,7 +162,8 @@ def build_context(include_vision: bool = False) -> str:
     w = get_weather()
     indego = get_indego_state()
     state = load_state()
-    state_map = {258: "Docked", 257: "Charging", 1: "Mowing", 64513: "Offline"}
+    state_map = {258: "Docked", 257: "Charging", 1: "Mowing",
+                 513: "Leaving dock", 512: "Paused", 514: "Mowing", 64513: "Offline"}
     mower_state = state_map.get(indego.get("state"), "Unknown")
     mowed_pct = indego.get("mowed", "?")
     days_ago = days_since_last_mow(state)

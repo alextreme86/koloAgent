@@ -837,7 +837,8 @@ def main(trigger_mow: bool = False):
         print("\n[3/4] Checking mower state...")
         indego = get_indego_state()
         state_map = {258: "Docked", 257: "Charging", 1: "Mowing",
-                     0: "Reading status", 64512: "Offline"}
+                     513: "Leaving dock", 512: "Paused", 514: "Mowing",
+                     0: "Reading status", 64512: "Offline", 64513: "Offline"}
         mower_state = state_map.get(indego.get("state"), f"State {indego.get('state', '?')}")
         mowed_pct   = indego.get("mowed", "?")
         print(f"  Mower: {mower_state}, mowed: {mowed_pct}%")
