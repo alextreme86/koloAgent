@@ -616,15 +616,20 @@ def _indego_command(state: int, label: str) -> tuple[bool, str]:
     if not headers:
         return False, "No auth token"
     try:
-        # Check current mower state first
         cur = get_indego_state()
-        cur_code = cur.get("state")
+        cur_code  = cur.get("state")
+        mowed_pct = cur.get("mowed", 0)
         if cur_code == 64513:
             return False, "Mower is offline — not reachable via cloud"
         r = requests.put(f"{INDEGO_BASE}/alms/{INDEGO_ALM_SN}/state",
                          headers=headers, json={"state": state}, timeout=60)
         ok = r.status_code in (200, 204)
-        reason = "" if ok else f"HTTP {r.status_code}: {r.text[:120]}"
+        if not ok:
+            reason = (f"Bosch API rejected the command (HTTP {r.status_code}). "
+                      f"Open the Bosch Indego app, start or dock from there once, "
+                      f"then remote commands should work again.")
+        else:
+            reason = ""
         print(f"  [Indego] {label}: {'OK' if ok else reason}")
         return ok, reason
     except Exception as e:
