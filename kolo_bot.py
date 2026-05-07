@@ -34,6 +34,7 @@ from kolo_agent import (
     analyse_with_gemini, send_telegram_message, send_telegram_media_group,
     start_mowing, pause_mowing, dock_mower,
     load_state, should_mow_today, record_mow_session, days_since_last_mow,
+    load_moisture_commentary,
 )
 import base64
 from PIL import Image
@@ -201,14 +202,69 @@ def build_context(include_vision: bool = False) -> str:
     except Exception:
         soil_str = "unavailable"
 
+    # Valve / irrigation status
+    try:
+        from kolo_irrigation import get_all_valve_status
+        valves = get_all_valve_status()
+        v_parts = []
+        for zone, v in valves.items():
+            st = "OPEN" if v.get("open") else "closed"
+            cd = f" {v.get('countdown')}s" if v.get("open") and v.get("countdown") else ""
+            v_parts.append(f"{zone} {st}{cd}")
+        valve_str = " | ".join(v_parts) if v_parts else "unavailable"
+    except Exception:
+        valve_str = "unavailable"
+
+    # Last irrigation events per zone (from DB)
+    try:
+        import sqlite3 as _sq
+        _DB = os.path.join(os.path.dirname(__file__), "kolo_data.db")
+        irr_parts = []
+        if os.path.exists(_DB):
+            _con = _sq.connect(_DB)
+            _con.row_factory = _sq.Row
+            for zone in ("greenhouse", "outdoor"):
+                row = _con.execute(
+                    """SELECT date(ts_open) as day, round(duration_actual_s/60.0,1) as dur,
+                              moisture_before, moisture_after FROM irrigation_events
+                       WHERE zone=? AND status='completed' ORDER BY id DESC LIMIT 1""",
+                    (zone,)
+                ).fetchone()
+                if row:
+                    irr_parts.append(f"{zone}: {row['day']} {row['dur']}min "
+                                     f"{row['moisture_before']}%→{row['moisture_after']}%")
+            _con.close()
+        irr_str = " | ".join(irr_parts) if irr_parts else "none recorded"
+    except Exception:
+        irr_str = "unavailable"
+
+    # Moisture commentary (latest Ollama insight)
+    try:
+        mc = load_moisture_commentary()
+        moisture_comment = mc.get("comment", "")[:300] if mc else ""
+        moisture_comment_ts = mc.get("ts", "")[:16] if mc else ""
+    except Exception:
+        moisture_comment = ""
+        moisture_comment_ts = ""
+
+    # Last grass analysis from state
+    grass_analysis = state.get("last_analysis", "")
+    grass_analysis_ts = state.get("last_analysis_ts", "")
+
     lines = [
         f"[{datetime.datetime.now().strftime('%d/%m %H:%M')}]",
         f"Weather: {w_str}",
         f"Sensors: {aqara_str}",
-        f"Soil: {soil_str}",
+        f"Soil moisture: {soil_str}",
+        f"Valves: {valve_str}",
+        f"Last irrigation: {irr_str}",
         f"Mower: {mower_state}, {mowed_pct}% mowed, last mow {days_ago}d ago",
-        f"Mow OK today: {'yes' if will_mow else 'no - ' + reason}",
+        f"Mow OK today: {'yes' if will_mow else 'no — ' + reason}",
     ]
+    if grass_analysis:
+        lines.append(f"Grass analysis ({grass_analysis_ts}): {grass_analysis}")
+    if moisture_comment:
+        lines.append(f"Moisture insight ({moisture_comment_ts}): {moisture_comment}")
 
     # Vision (if requested) — uses Greenhouse camera (.102) for PTZ
     if include_vision:

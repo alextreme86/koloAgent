@@ -853,6 +853,8 @@ def main(trigger_mow: bool = False):
         needs_mowing = "yes" in analysis.lower().split("needs_mowing:")[-1][:10] or \
                        "soon" in analysis.lower().split("needs_mowing:")[-1][:10]
         state["grass_needs_mow"] = needs_mowing
+        state["last_analysis"] = analysis.strip()
+        state["last_analysis_ts"] = datetime.datetime.now().strftime("%d/%m %H:%M")
         save_state(state)
 
         # Smart scheduling decision
