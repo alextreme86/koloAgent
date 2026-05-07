@@ -454,11 +454,14 @@ def _execute_pending(pending: dict) -> tuple:
     action = pending.get("action", "")
     params = pending.get("params", {})
     if action == "mower_start":
-        return ("Mower started ✅" if start_mowing() else "Failed to start mower ❌", None)
+        ok, reason = start_mowing()
+        return ("Mower started ✅" if ok else f"Failed to start mower ❌\n_{reason}_", None)
     if action == "mower_pause":
-        return ("Mower paused ✅" if pause_mowing() else "Failed to pause ❌", None)
+        ok, reason = pause_mowing()
+        return ("Mower paused ✅" if ok else f"Failed to pause ❌\n_{reason}_", None)
     if action == "mower_dock":
-        return ("Mower docking ✅" if dock_mower() else "Failed to dock ❌", None)
+        ok, reason = dock_mower()
+        return ("Mower docking ✅" if ok else f"Failed to dock ❌\n_{reason}_", None)
     if action == "valve_open":
         from kolo_irrigation import open_valve
         v, m = params.get("valve", "outdoor"), params.get("minutes", 10)

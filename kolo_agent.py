@@ -610,23 +610,30 @@ def get_indego_state() -> dict:
     return {"error": f"HTTP {r.status_code}"}
 
 
-def _indego_command(state: int, label: str) -> bool:
+def _indego_command(state: int, label: str) -> tuple[bool, str]:
+    """Returns (ok, reason). reason is empty string on success."""
     headers = _indego_headers()
     if not headers:
-        return False
+        return False, "No auth token"
     try:
+        # Check current mower state first
+        cur = get_indego_state()
+        cur_code = cur.get("state")
+        if cur_code == 64513:
+            return False, "Mower is offline — not reachable via cloud"
         r = requests.put(f"{INDEGO_BASE}/alms/{INDEGO_ALM_SN}/state",
                          headers=headers, json={"state": state}, timeout=60)
         ok = r.status_code in (200, 204)
-        print(f"  [Indego] {label}: {'OK' if ok else f'HTTP {r.status_code}'}")
-        return ok
+        reason = "" if ok else f"HTTP {r.status_code}: {r.text[:120]}"
+        print(f"  [Indego] {label}: {'OK' if ok else reason}")
+        return ok, reason
     except Exception as e:
         print(f"  [Indego] {label} failed: {e}")
-        return False
+        return False, str(e)
 
-def start_mowing() -> bool:  return _indego_command(1,   "Start mowing")
-def pause_mowing() -> bool:  return _indego_command(2,   "Pause")
-def dock_mower()   -> bool:  return _indego_command(257, "Return to dock")
+def start_mowing() -> tuple[bool, str]:  return _indego_command(1,   "Start mowing")
+def pause_mowing() -> tuple[bool, str]:  return _indego_command(2,   "Pause")
+def dock_mower()   -> tuple[bool, str]:  return _indego_command(257, "Return to dock")
 
 # ── State / scheduling ───────────────────────────────────────────────────────
 
@@ -900,7 +907,8 @@ def main(trigger_mow: bool = False):
         # Manual trigger only — never auto-start from daily run
         if trigger_mow:
             print(f"\nStarting mower (manual --mow flag)...")
-            if start_mowing():
+            _ok, _reason = start_mowing()
+            if _ok:
                 send_telegram_message(f"Mower started! {mow_reason}")
                 record_mow_session(state, mowed_pct)
                 print("  Mower started.")
@@ -918,10 +926,10 @@ if __name__ == "__main__":
 
     # Direct mower commands (no analysis)
     if "--start" in args:
-        start_mowing(); sys.exit()
+        start_mowing()[0]; sys.exit()
     if "--pause" in args:
-        pause_mowing(); sys.exit()
+        pause_mowing()[0]; sys.exit()
     if "--dock" in args:
-        dock_mower(); sys.exit()
+        dock_mower()[0]; sys.exit()
 
     main(trigger_mow="--mow" in args)
