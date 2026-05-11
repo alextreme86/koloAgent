@@ -24,7 +24,7 @@ TUYA_SECRET = "901eef5d32514f8e98a715361ea336bb"
 SENSORS = {
     "greenhouse":        ("bfb1908669a3d57b32sgnl", "Greenhouse",              True),
     "greenhouse_basil":  ("bfccd88f1db54fbf5btzjp", "Greenhouse Basil",        True),
-    "cassa_bassa":       ("bfe68a7bf65f54633cnfqv", "Bed 40cm (outdoor)",      False),  # not planted
+    "cassa_bassa":       ("bfe68a7bf65f54633cnfqv", "Bed 40cm (outdoor)",      True),
     "cassa_bassa_serra": ("bf3fb8f496e11d9777mcoa", "Germination Box",          True),
     "cassa_alta":        ("bf918f92a07055b0f8s5af", "Bed 80cm (outdoor)",      True),
     "fragole":           ("bff8de89ab98a67b9abkzx", "Strawberries",            True),
