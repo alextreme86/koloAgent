@@ -13,17 +13,18 @@ Architecture from the slide:
         action = llm.run(system_prompt + env.state)
         env.state = tools.run(action)
 
-The LLM (Claude on AgentMex) observes the current garden state and decides
+The LLM (Ollama on AgentMex) observes the current garden state and decides
 which tools to call. Tools execute on Pi Zero kolo (camera, sensors) and via
-cloud APIs (mower, valves, weather). The loop continues until Claude has
+cloud APIs (mower, valves, weather). The loop continues until the model has
 finished its assessment and taken all necessary actions.
 
 Usage:
     python3 kolo_agent_loop.py              # full autonomous run
     python3 kolo_agent_loop.py --dry-run    # assess only, no actions
+    python3 kolo_agent_loop.py --model qwen2.5:14b
 """
 
-import os, json, datetime, logging, sys
+import os, json, datetime, logging, sys, requests
 from pathlib import Path
 
 # ── Load .env ─────────────────────────────────────────────────────────────────
@@ -36,9 +37,11 @@ if os.path.exists(_ENV):
                 _k, _v = _line.split("=", 1)
                 os.environ.setdefault(_k.strip(), _v.strip())
 
-import anthropic
-
 log = logging.getLogger(__name__)
+
+# ── Ollama config ─────────────────────────────────────────────────────────────
+OLLAMA_BASE  = "http://100.67.199.79:11434"
+OLLAMA_MODEL = "qwen3.5:4b"   # override with --model; qwen2.5:14b for best tool use
 
 # ── System Prompt ─────────────────────────────────────────────────────────────
 # "Goals, constraints, and how to act"
@@ -293,167 +296,194 @@ def execute_tool(name: str, tool_input: dict) -> str:
     return json.dumps(result)
 
 
-# ── Tool schemas (Claude tool definitions) ────────────────────────────────────
-# These tell the LLM what tools are available and how to call them.
+# ── Tool schemas (Ollama / OpenAI tool-use format) ────────────────────────────
+# Ollama uses {"type": "function", "function": {name, description, parameters}}
+# which matches the OpenAI tool-call convention.
 
 TOOLS = [
     {
-        "name": "get_moisture_sensors",
-        "description": (
-            "Read soil moisture, temperature, and battery from all 6 soil sensors via Tuya cloud. "
-            "Zones: greenhouse, greenhouse_basil, cassa_bassa (40cm outdoor bed), "
-            "cassa_bassa_serra (germination box), cassa_alta (80cm outdoor bed), fragole (strawberries). "
-            "Returns moisture %, soil temp °C, battery % per zone."
-        ),
-        "input_schema": {
-            "type": "object",
-            "properties": {
-                "use_cache": {
-                    "type": "boolean",
-                    "description": "Use cached data if <10 min old (default true). Set false to force fresh read."
-                }
-            },
-            "required": []
-        }
-    },
-    {
-        "name": "get_temperatures",
-        "description": (
-            "Read temperature and humidity from all Aqara sensors (Aqara Hub E1). "
-            "Locations: kolonihavehus (indoor), outdoor, greenhouse. "
-            "Returns temp °C, humidity %, pressure hPa (kolonihavehus only)."
-        ),
-        "input_schema": {
-            "type": "object",
-            "properties": {},
-            "required": []
-        }
-    },
-    {
-        "name": "get_weather_forecast",
-        "description": (
-            "Fetch current weather and 48h forecast for Hedehusene, Denmark from wttr.in. "
-            "Returns: current temp °C, wind km/h, humidity %, rain next 3h, "
-            "today/tomorrow min/max temps, overnight min, UV index, cloud cover."
-        ),
-        "input_schema": {
-            "type": "object",
-            "properties": {},
-            "required": []
-        }
-    },
-    {
-        "name": "capture_camera_visual",
-        "description": (
-            "Capture a photo from a garden camera and get an AI visual assessment. "
-            "Returns GRASS_LENGTH (very short/short/medium/long/very long), "
-            "NEEDS_MOWING (yes/no/soon), GRASS_COLOR, and OBSERVATIONS about grass condition."
-        ),
-        "input_schema": {
-            "type": "object",
-            "properties": {
-                "camera": {
-                    "type": "string",
-                    "enum": ["garden", "greenhouse", "all"],
-                    "description": "'garden' for the main grass area camera, 'greenhouse' for the greenhouse camera, 'all' for all cameras"
-                }
-            },
-            "required": []
-        }
-    },
-    {
-        "name": "get_mower_status",
-        "description": (
-            "Get the current state of the Bosch Indego S+ 400 robot mower. "
-            "Returns: state code and description (docked/mowing/charging/error), "
-            "mowed percentage, battery level, and last activity."
-        ),
-        "input_schema": {
-            "type": "object",
-            "properties": {},
-            "required": []
-        }
-    },
-    {
-        "name": "control_mower",
-        "description": (
-            "Send a command to the Bosch Indego robot mower via Bosch cloud API. "
-            "Only call 'start' after verifying weather conditions AND grass assessment. "
-            "Always notify the owner before starting."
-        ),
-        "input_schema": {
-            "type": "object",
-            "properties": {
-                "action": {
-                    "type": "string",
-                    "enum": ["start", "pause", "dock"],
-                    "description": (
-                        "'start' — send to mow the lawn; "
-                        "'pause' — pause mowing in place; "
-                        "'dock' — return to charging dock"
-                    )
-                }
-            },
-            "required": ["action"]
-        }
-    },
-    {
-        "name": "open_valve",
-        "description": (
-            "Open an irrigation valve to water a zone. The valve auto-closes after duration. "
-            "Zones: 'greenhouse' (controls greenhouse + basil pot sensors) or "
-            "'outdoor' (controls raised beds + strawberries). "
-            "Check moisture sensors and weather forecast before calling. "
-            "Avoid 11:00–16:00. Max 20 min per session."
-        ),
-        "input_schema": {
-            "type": "object",
-            "properties": {
-                "zone": {
-                    "type": "string",
-                    "enum": ["greenhouse", "outdoor"]
+        "type": "function",
+        "function": {
+            "name": "get_moisture_sensors",
+            "description": (
+                "Read soil moisture, temperature, and battery from all 6 soil sensors via Tuya cloud. "
+                "Zones: greenhouse, greenhouse_basil, cassa_bassa (40cm outdoor bed), "
+                "cassa_bassa_serra (germination box), cassa_alta (80cm outdoor bed), fragole (strawberries). "
+                "Returns moisture %, soil temp °C, battery % per zone."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "use_cache": {
+                        "type": "boolean",
+                        "description": "Use cached data if <10 min old (default true). Set false to force fresh read."
+                    }
                 },
-                "duration_min": {
-                    "type": "integer",
-                    "description": "Minutes to water (1–20)",
-                    "minimum": 1,
-                    "maximum": 20
-                }
-            },
-            "required": ["zone", "duration_min"]
+                "required": []
+            }
         }
     },
     {
-        "name": "close_valve",
-        "description": "Immediately close an irrigation valve.",
-        "input_schema": {
-            "type": "object",
-            "properties": {
-                "zone": {
-                    "type": "string",
-                    "enum": ["greenhouse", "outdoor"]
-                }
-            },
-            "required": ["zone"]
+        "type": "function",
+        "function": {
+            "name": "get_temperatures",
+            "description": (
+                "Read temperature and humidity from all Aqara sensors (Aqara Hub E1). "
+                "Locations: kolonihavehus (indoor), outdoor, greenhouse. "
+                "Returns temp °C, humidity %, pressure hPa (kolonihavehus only)."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {},
+                "required": []
+            }
         }
     },
     {
-        "name": "send_notification",
-        "description": (
-            "Send a Telegram message to the garden owner. "
-            "Use for: mowing started/stopped, irrigation started/stopped, "
-            "frost warnings, critical moisture alerts, daily summary. "
-            "Supports HTML formatting (<b>bold</b>, <i>italic</i>)."
-        ),
-        "input_schema": {
-            "type": "object",
-            "properties": {
-                "message": {
-                    "type": "string",
-                    "description": "The message to send. HTML formatting supported."
-                }
-            },
-            "required": ["message"]
+        "type": "function",
+        "function": {
+            "name": "get_weather_forecast",
+            "description": (
+                "Fetch current weather and 48h forecast for Hedehusene, Denmark from wttr.in. "
+                "Returns: current temp °C, wind km/h, humidity %, rain next 3h, "
+                "today/tomorrow min/max temps, overnight min, UV index, cloud cover."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {},
+                "required": []
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "capture_camera_visual",
+            "description": (
+                "Capture a photo from a garden camera and get an AI visual assessment. "
+                "Returns GRASS_LENGTH (very short/short/medium/long/very long), "
+                "NEEDS_MOWING (yes/no/soon), GRASS_COLOR, and OBSERVATIONS about grass condition."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "camera": {
+                        "type": "string",
+                        "enum": ["garden", "greenhouse", "all"],
+                        "description": "'garden' for the main grass area camera, 'greenhouse' for the greenhouse camera, 'all' for all cameras"
+                    }
+                },
+                "required": []
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_mower_status",
+            "description": (
+                "Get the current state of the Bosch Indego S+ 400 robot mower. "
+                "Returns: state code and description (docked/mowing/charging/error), "
+                "mowed percentage, battery level, and last activity."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {},
+                "required": []
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "control_mower",
+            "description": (
+                "Send a command to the Bosch Indego robot mower via Bosch cloud API. "
+                "Only call 'start' after verifying weather conditions AND grass assessment. "
+                "Always notify the owner before starting."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "action": {
+                        "type": "string",
+                        "enum": ["start", "pause", "dock"],
+                        "description": (
+                            "'start' — send to mow the lawn; "
+                            "'pause' — pause mowing in place; "
+                            "'dock' — return to charging dock"
+                        )
+                    }
+                },
+                "required": ["action"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "open_valve",
+            "description": (
+                "Open an irrigation valve to water a zone. The valve auto-closes after duration. "
+                "Zones: 'greenhouse' (controls greenhouse + basil pot sensors) or "
+                "'outdoor' (controls raised beds + strawberries). "
+                "Check moisture sensors and weather forecast before calling. "
+                "Avoid 11:00–16:00. Max 20 min per session."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "zone": {
+                        "type": "string",
+                        "enum": ["greenhouse", "outdoor"]
+                    },
+                    "duration_min": {
+                        "type": "integer",
+                        "description": "Minutes to water (1–20)",
+                        "minimum": 1,
+                        "maximum": 20
+                    }
+                },
+                "required": ["zone", "duration_min"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "close_valve",
+            "description": "Immediately close an irrigation valve.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "zone": {
+                        "type": "string",
+                        "enum": ["greenhouse", "outdoor"]
+                    }
+                },
+                "required": ["zone"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "send_notification",
+            "description": (
+                "Send a Telegram message to the garden owner. "
+                "Use for: mowing started/stopped, irrigation started/stopped, "
+                "frost warnings, critical moisture alerts, daily summary."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "message": {
+                        "type": "string",
+                        "description": "The message to send."
+                    }
+                },
+                "required": ["message"]
+            }
         }
     }
 ]
@@ -462,7 +492,7 @@ TOOLS = [
 # ── Agent Loop ────────────────────────────────────────────────────────────────
 # "while True: action = llm.run(system_prompt + env.state); env.state = tools.run(action)"
 
-def run_agent(dry_run: bool = False) -> str:
+def run_agent(dry_run: bool = False, model: str = OLLAMA_MODEL) -> str:
     """
     Run one full autonomous garden assessment cycle.
 
@@ -472,77 +502,84 @@ def run_agent(dry_run: bool = False) -> str:
         prompt  = SYSTEM_PROMPT         # goals, constraints, how to act
 
         while True:
-            action   = llm.run(prompt + env.state)   # Claude decides
+            action   = llm.run(prompt + env.state)   # Ollama decides
             env.state = tools.run(action)             # tools update state
 
     Returns the final agent summary string.
     """
-    env    = KoloEnvironment()
-    client = anthropic.Anthropic(api_key=os.environ.get("ANTHROPIC_API_KEY", ""))
+    env = KoloEnvironment()
 
-    # env.state — initial context seeded into the conversation
     initial_context = env.as_context()
     if dry_run:
         initial_context += (
-            "\n\n<dry_run>Assess the garden fully but do NOT send notifications, "
-            "control the mower, or open/close valves.</dry_run>"
+            "\n\n[DRY RUN: Assess the garden fully but do NOT send notifications, "
+            "control the mower, or open/close valves.]"
         )
 
-    messages = [{"role": "user", "content": initial_context}]
+    messages = [
+        {"role": "system", "content": SYSTEM_PROMPT},
+        {"role": "user",   "content": initial_context},
+    ]
 
-    log.info("KoloAgent starting — %s%s",
-             datetime.datetime.now().isoformat(),
+    log.info("KoloAgent starting — %s model=%s%s",
+             datetime.datetime.now().isoformat(), model,
              " [DRY RUN]" if dry_run else "")
 
+    MAX_ITERATIONS = 20
     # ── Agent loop ────────────────────────────────────────────────────────────
-    while True:
+    for iteration in range(MAX_ITERATIONS):
         # action = llm.run(system_prompt + env.state)
-        response = client.messages.create(
-            model="claude-opus-4-7",
-            max_tokens=4096,
-            thinking={"type": "adaptive"},
-            system=[{
-                "type": "text",
-                "text": SYSTEM_PROMPT,
-                "cache_control": {"type": "ephemeral"},  # stable prefix — cache it
-            }],
-            tools=TOOLS,
-            messages=messages,
-        )
+        resp = requests.post(
+            f"{OLLAMA_BASE}/api/chat",
+            json={
+                "model":    model,
+                "messages": messages,
+                "tools":    TOOLS,
+                "stream":   False,
+                "think":    False,
+                "options":  {"temperature": 0.1},
+            },
+            timeout=180,
+        ).json()
 
-        log.info("LLM response: stop_reason=%s, blocks=%d",
-                 response.stop_reason, len(response.content))
+        msg        = resp.get("message", {})
+        tool_calls = msg.get("tool_calls") or []
+        done_reason = resp.get("done_reason", "")
+
+        log.info("LLM response [iter %d]: done_reason=%s tool_calls=%d",
+                 iteration, done_reason, len(tool_calls))
 
         # Append assistant turn to conversation history
-        messages.append({"role": "assistant", "content": response.content})
+        assistant_msg: dict = {"role": "assistant", "content": msg.get("content") or ""}
+        if tool_calls:
+            assistant_msg["tool_calls"] = tool_calls
+        messages.append(assistant_msg)
 
-        # Done — no more tool calls
-        if response.stop_reason == "end_turn":
-            summary = next(
-                (b.text for b in response.content if b.type == "text"),
-                "Agent completed — no summary produced."
-            )
+        # Done — no more tool calls requested
+        if done_reason == "stop" and not tool_calls:
+            summary = msg.get("content") or "Agent completed — no summary produced."
             log.info("Agent done: %s", summary[:300])
             return summary
 
-        # env.state = tools.run(action) — execute each tool Claude called
-        tool_blocks = [b for b in response.content if b.type == "tool_use"]
-        if not tool_blocks:
-            break  # no tool calls and not end_turn — shouldn't happen, exit safely
+        # env.state = tools.run(action) — execute each tool the model called
+        if not tool_calls:
+            break  # model stopped without tool calls and not "stop" — exit safely
 
-        tool_results = []
-        for tb in tool_blocks:
-            result_json = execute_tool(tb.name, tb.input)
-            tool_results.append({
-                "type": "tool_result",
-                "tool_use_id": tb.id,
-                "content": result_json,
-            })
+        for tc in tool_calls:
+            fn   = tc.get("function", {})
+            name = fn.get("name", "")
+            args = fn.get("arguments", {})
+            if isinstance(args, str):
+                try:
+                    args = json.loads(args)
+                except json.JSONDecodeError:
+                    args = {}
 
-        # Feed tool results back — this updates env.state for the next iteration
-        messages.append({"role": "user", "content": tool_results})
+            result_json = execute_tool(name, args)
+            # Feed tool result back — updates env.state for the next iteration
+            messages.append({"role": "tool", "content": result_json})
 
-    return "Agent loop exited unexpectedly."
+    return "Agent loop exited — maximum iterations reached."
 
 
 # ── Entry point ───────────────────────────────────────────────────────────────
@@ -564,9 +601,11 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="KoloAgent — autonomous garden loop")
     parser.add_argument("--dry-run", action="store_true",
                         help="Assess garden but take no actions (no mowing, watering, notifications)")
+    parser.add_argument("--model", default=OLLAMA_MODEL,
+                        help=f"Ollama model to use (default: {OLLAMA_MODEL})")
     args = parser.parse_args()
 
-    summary = run_agent(dry_run=args.dry_run)
+    summary = run_agent(dry_run=args.dry_run, model=args.model)
     print("\n" + "=" * 60)
     print("AGENT SUMMARY")
     print("=" * 60)
